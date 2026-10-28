@@ -1,0 +1,295 @@
+---
+# =============================================================================
+# One agent — directory, extract, register, service, verify
+# =============================================================================
+# Included once per entry of __ado_instances with loop_var `agent`
+# ({number, root, name}). Every step is guarded by the state it depends on, so a
+# re-run changes nothing and a run that stopped half way continues where it stopped.
+
+# No owner or mode on purpose: this only creates /var/agents if it is missing and must
+# not re-own or re-mode a parent directory that already exists.
+- name: Create the parent of the agent directory  # noqa: risky-file-permissions
+  ansible.builtin.file:
+    path: "{{ agent.root | dirname }}"
+    state: directory
+  tags: [agent]
+
+- name: Create the agent directory
+  ansible.builtin.file:
+    path: "{{ agent.root }}"
+    state: directory
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+    mode: "0755"
+  tags: [agent]
+
+- name: Check for an existing agent configuration
+  ansible.builtin.stat:
+    path: "{{ agent.root }}/.agent"
+  register: __ado_cfg
+  tags: [agent]
+
+- name: Read the existing agent configuration
+  ansible.builtin.slurp:
+    src: "{{ agent.root }}/.agent"
+  register: __ado_cfg_content
+  when: __ado_cfg.stat.exists
+  tags: [agent]
+
+- name: Refuse to silently reuse an agent configured with different parameters
+  ansible.builtin.assert:
+    that:
+      - (__ado_cfg_content.content | b64decode | from_json).agentName == agent.name
+      - (__ado_cfg_content.content | b64decode | from_json).poolName == ado_agent_pool
+      - (__ado_cfg_content.content | b64decode | from_json).serverUrl | default('') | lower | regex_replace('/+$', '')
+        == ado_org_url | lower | regex_replace('/+$', '')
+    fail_msg: >-
+      {{ agent.root }} is already configured for a different agent name, pool or server
+      (it holds '{{ (__ado_cfg_content.content | b64decode | from_json).agentName }}' in pool
+      '{{ (__ado_cfg_content.content | b64decode | from_json).poolName }}' on
+      '{{ (__ado_cfg_content.content | b64decode | from_json).serverUrl | default('?') }}').
+      Reconfigure it deliberately using your organization's agent retirement procedure.
+  when: __ado_cfg.stat.exists
+  tags: [agent]
+
+# ── extract ──────────────────────────────────────────────────────────────────
+- name: Extract the agent package
+  ansible.builtin.unarchive:
+    src: "{{ __ado_archive }}"
+    dest: "{{ agent.root }}"
+    remote_src: true
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+    creates: "{{ agent.root }}/config.sh"
+  register: __ado_extract
+  when: not __ado_cfg.stat.exists
+  tags: [agent]
+
+# Not a handler: it must finish before config.sh, which runs a few tasks later.
+- name: Hand the extracted files to the agent user  # noqa: no-handler
+  ansible.builtin.file:
+    path: "{{ agent.root }}"
+    state: directory
+    recurse: true
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+  when: __ado_extract is changed
+  tags: [agent]
+
+# ⚑ The archive's top-level entry carries its own mode and replaces the directory's, so
+#   without this the NEXT run's "Create the agent directory" reports a change and puts
+#   it back — found by the second-run check in tests/run-service-test.sh.
+- name: Restore the agent directory's own mode after extraction  # noqa: no-handler
+  ansible.builtin.file:
+    path: "{{ agent.root }}"
+    state: directory
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+    mode: "0755"
+  when: __ado_extract is changed
+  tags: [agent]
+
+# ── register ─────────────────────────────────────────────────────────────────
+# ⚑ THE PAT NEVER APPEARS ON A COMMAND LINE. The original passed `--token <PAT>`,
+#   which every user on the host can read in `ps` for as long as config.sh runs.
+#   The agent reads VSTS_AGENT_INPUT_TOKEN instead (checked against the real
+#   Agent.Listener: with it set config.sh goes on to connect, without it it stops
+#   with "Invalid configuration provided for token"). Ansible's own `environment:`
+#   would put the value in the shell command line, so the token goes through a
+#   0400 file that only the agent user can read, is read inside the config.sh
+#   process, and is deleted in `always` whether or not registration succeeds.
+- name: Register the agent in the pool
+  when: not __ado_cfg.stat.exists
+  tags: [agent, register]
+  block:
+    - name: Stage the PAT where only the agent user can read it
+      ansible.builtin.copy:
+        content: "{{ ado_pat | trim }}"
+        dest: "{{ agent.root }}/.ansible-pat"
+        owner: "{{ ado_agent_user }}"
+        group: "{{ ado_agent_group }}"
+        mode: "0400"
+      no_log: true
+
+    - name: Run config.sh
+      ansible.builtin.command:
+        argv: >-
+          {{ ['bash', '-c', 'VSTS_AGENT_INPUT_TOKEN="$(cat "$1")" exec ./config.sh "${@:2}"', '_',
+              agent.root ~ '/.ansible-pat',
+              '--unattended', '--acceptTeeEula',
+              '--url', ado_org_url,
+              '--auth', 'pat',
+              '--pool', ado_agent_pool,
+              '--agent', agent.name,
+              '--work', ado_agent_work_dir,
+              '--replace']
+             + ado_agent_extra_config_args }}
+      args:
+        chdir: "{{ agent.root }}"
+      become: true
+      become_user: "{{ ado_agent_user }}"
+      environment:
+        AGENT_ALLOW_RUNASROOT: "0"
+      register: __ado_config_run
+      # The real error is the whole point of a failure, and no_log would hide it, so
+      # the task is allowed to fail quietly and the next task reports it with the
+      # PAT removed from every line.
+      failed_when: false
+      changed_when: __ado_config_run.rc == 0
+      no_log: true
+
+    - name: Show why registration failed (PAT removed)
+      ansible.builtin.debug:
+        msg: >-
+          {{ ['config.sh exited ' ~ __ado_config_run.rc ~ ' registering ' ~ agent.name ~ ' in pool ' ~ ado_agent_pool ~ ' on ' ~ ado_org_url ~ ':']
+             + (((__ado_config_run.stdout_lines | default([])) + (__ado_config_run.stderr_lines | default([])))
+                | map('replace', ado_pat | trim, '********') | list)[-20:]
+             + ['Full agent log: ' ~ agent.root ~ '/_diag/'] }}
+      when: __ado_config_run.rc | default(0) != 0
+
+    - name: Stop if registration failed
+      ansible.builtin.fail:
+        msg: >-
+          Registration of {{ agent.name }} failed (config.sh exit {{ __ado_config_run.rc }}); see the
+          output above. Nothing was installed as a service. Fix the cause and re-run — the
+          run resumes from here.
+      when: __ado_config_run.rc | default(0) != 0
+
+  always:
+    - name: Remove the staged PAT
+      ansible.builtin.file:
+        path: "{{ agent.root }}/.ansible-pat"
+        state: absent
+
+# ── credentials permissions ──────────────────────────────────────────────────
+# The agent stores its credentials in these files; whatever mode it creates them with,
+# nobody but the agent user reads them.
+- name: Look for the credential files
+  ansible.builtin.stat:
+    path: "{{ agent.root }}/{{ item }}"
+  loop: [.credentials, .credentials_rsaparams]
+  register: __ado_cred_files
+  tags: [agent]
+
+- name: Restrict the credential files to the agent user
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+    mode: "0600"
+  loop: "{{ __ado_cred_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+  tags: [agent]
+
+# ── service (svc.sh install / start / status) ────────────────────────────────
+# ⚑ KEYED ON .service, NOT ON .agent. config.sh writes svc.sh, svc.sh install writes
+#   .service last. The original gated install and start on "no .agent", so a run that
+#   registered the agent and then failed (or was interrupted) before the service step
+#   never installed the service on any later run — the agent stayed registered,
+#   offline, forever. The original's `creates: vsts.agent.*.service` glob also matched
+#   the FIRST agent's unit, which would have skipped every later agent on the host.
+- name: Check whether the service is installed
+  ansible.builtin.stat:
+    path: "{{ agent.root }}/.service"
+  register: __ado_svc_before
+  tags: [agent, service]
+
+- name: Install the agent service
+  ansible.builtin.command:
+    argv: ["./svc.sh", "install", "{{ ado_agent_user }}"]
+  args:
+    chdir: "{{ agent.root }}"
+  # Only runs when .service is absent, so a run of it is always a change.
+  changed_when: true
+  when: not __ado_svc_before.stat.exists
+  tags: [agent, service]
+
+- name: Check the service is installed now
+  ansible.builtin.stat:
+    path: "{{ agent.root }}/.service"
+  register: __ado_svc
+  tags: [agent, service]
+
+- name: Start, verify and report the service
+  when: __ado_svc.stat.exists
+  tags: [agent, service, verify]
+  block:
+    - name: Read the unit name
+      ansible.builtin.command:
+        argv: ["cat", "{{ agent.root }}/.service"]
+      register: __ado_unit
+      changed_when: false
+      check_mode: false
+
+    - name: Check whether the service is already running
+      ansible.builtin.command:
+        argv: ["systemctl", "is-active", "{{ __ado_unit.stdout | trim }}"]
+      register: __ado_active
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Start the agent service
+      ansible.builtin.command:
+        argv: ["./svc.sh", "start"]
+      args:
+        chdir: "{{ agent.root }}"
+      # Only runs when the unit is not active, so a run of it is always a change.
+      changed_when: true
+      when: __ado_active.stdout | trim != 'active'
+
+    - name: Wait for the service to be active
+      ansible.builtin.command:
+        argv: ["systemctl", "is-active", "{{ __ado_unit.stdout | trim }}"]
+      register: __ado_wait
+      until: __ado_wait.stdout | trim == 'active'
+      retries: "{{ ado_agent_service_retries }}"
+      delay: "{{ ado_agent_service_delay }}"
+      changed_when: false
+      check_mode: false
+
+    - name: Read the service status
+      ansible.builtin.command:
+        argv: ["./svc.sh", "status"]
+      args:
+        chdir: "{{ agent.root }}"
+      register: __ado_status
+      changed_when: false
+      check_mode: false
+
+    - name: Read the agent version
+      ansible.builtin.command:
+        argv: ["{{ agent.root }}/bin/Agent.Listener", "--version"]
+      become: true
+      become_user: "{{ ado_agent_user }}"
+      register: __ado_version
+      changed_when: false
+      check_mode: false
+
+    - name: Report the agent
+      ansible.builtin.debug:
+        msg:
+          - "Agent {{ agent.name }} (number {{ agent.number }}): {{ __ado_unit.stdout | trim }} is active"
+          - "Directory: {{ agent.root }}; agent version {{ __ado_version.stdout | trim }}"
+
+  rescue:
+    - name: Collect what the service logged
+      ansible.builtin.command:
+        argv: ["journalctl", "-u", "{{ __ado_unit.stdout | default('') | trim }}", "-n", "40", "--no-pager"]
+      register: __ado_journal
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Show why the service is not running
+      ansible.builtin.debug:
+        msg: "{{ ['Service for ' ~ agent.name ~ ' is not active. Last journal lines:'] + (__ado_journal.stdout_lines | default([]))[-25:] }}"
+
+    - name: Stop
+      ansible.builtin.fail:
+        msg: >-
+          The service for {{ agent.name }} did not become active within
+          {{ ado_agent_service_retries * ado_agent_service_delay }}s. The journal is above; the agent's
+          own log is under {{ agent.root }}/_diag/. If a registered agent shows offline, this is why.

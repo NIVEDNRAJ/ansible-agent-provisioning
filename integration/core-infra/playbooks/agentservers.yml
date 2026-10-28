@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# Azure DevOps build agents — Ubuntu, Debian, RHEL and CentOS Stream
+# =============================================================================
+# Drop into ansible/playbooks/ next to jumpservers.yml and cdtool.yml, with the two
+# roles in ansible/roles/. Same shape as those playbooks: one group, roles by path.
+#
+#   export ADO_PAT='...'          # never in inventory.yml
+#   ansible-playbook -i inventory.yml playbooks/agentservers.yml
+#
+#   # validate inventory and target OS without touching anything
+#   ansible-playbook -i inventory.yml playbooks/agentservers.yml --tags preflight
+#
+#   # tooling only, or the agent only
+#   ansible-playbook -i inventory.yml playbooks/agentservers.yml --tags packages
+#   ansible-playbook -i inventory.yml playbooks/agentservers.yml --tags agent
+#
+# ⚑ gather_facts MUST STAY ON — both roles dispatch on gathered facts.
+# ⚑ serial: 1 — registration is per-agent and a failed host should stop the rollout.
+# =============================================================================
+
+- name: Provision Azure DevOps build agents
+  hosts: agentservers
+  become: yes
+  gather_facts: yes
+  serial: 1
+  roles:
+    - { role: ../roles/agent_packages/, tags: [packages] }
+    - { role: ../roles/ado_agent/, tags: [agent] }

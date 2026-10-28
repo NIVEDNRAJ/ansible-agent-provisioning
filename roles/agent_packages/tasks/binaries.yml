@@ -1,0 +1,151 @@
+---
+# =============================================================================
+# Tools packages.txt installs as downloaded binaries — identical on every distro
+# =============================================================================
+# None of these has an apt or dnf package, so nothing here is OS-specific; they
+# are x86_64 / amd64 only, which preflight enforces.
+#
+# ⚑ VERSION-AWARE, NOT JUST PRESENCE-AWARE. roles/jumpservers skips a tool if any
+#   version answers; here a changed pin (kubectl_version, helm_version,
+#   yq_version) replaces the binary on the next run, and an unchanged one is
+#   left alone — so re-running is idempotent and a bumped pin is enforced.
+
+# ── kubectl (packages.txt 10-13) ─────────────────────────────────────────────
+# packages.txt resolves "stable.txt" at run time; a pin is reproducible.
+- name: Check the installed kubectl
+  ansible.builtin.command: kubectl version --client
+  register: __agent_kubectl_check
+  failed_when: false
+  changed_when: false
+  when: agent_install_kubectl | bool
+  tags: [kubectl, binaries]
+
+- name: Install kubectl
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+    owner: root
+    group: root
+    checksum: "sha256:https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl.sha256"
+    force: true
+  when:
+    - agent_install_kubectl | bool
+    - __agent_kubectl_check.rc != 0 or kubectl_version not in (__agent_kubectl_check.stdout | default(''))
+  tags: [kubectl, binaries]
+
+# ── helm (packages.txt 15-19) ────────────────────────────────────────────────
+# packages.txt pipes get-helm-3 from the main branch into a shell; the release
+# tarball with its published checksum is the same binary without running a
+# script fetched from a moving branch.
+- name: Check the installed helm
+  ansible.builtin.command: helm version --short
+  register: __agent_helm_check
+  failed_when: false
+  changed_when: false
+  when: agent_install_helm | bool
+  tags: [helm, binaries]
+
+- name: Download helm
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    dest: "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    mode: "0644"
+    checksum: "sha256:https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz.sha256sum"
+  when:
+    - agent_install_helm | bool
+    - __agent_helm_check.rc != 0 or helm_version not in (__agent_helm_check.stdout | default(''))
+  register: __agent_helm_download
+  tags: [helm, binaries]
+
+- name: Install helm
+  ansible.builtin.unarchive:
+    src: "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: [--strip-components=1, linux-amd64/helm]
+  when: __agent_helm_download is not skipped
+  tags: [helm, binaries]
+
+- name: Remove the helm download
+  ansible.builtin.file:
+    path: "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    state: absent
+  when: __agent_helm_download is not skipped
+  tags: [helm, binaries, cleanup]
+
+# ── yq, mikefarah (packages.txt 82-84) ───────────────────────────────────────
+# ⚑ NOT the `yq` package: on Debian/Ubuntu that is a different, Python tool with
+#   different syntax. packages.txt installs the Go binary, and so does this.
+- name: Check the installed yq
+  ansible.builtin.command: yq --version
+  register: __agent_yq_check
+  failed_when: false
+  changed_when: false
+  when: agent_install_yq | bool
+  tags: [yq, binaries]
+
+- name: Install yq
+  ansible.builtin.get_url:
+    url: "https://github.com/mikefarah/yq/releases/download/v{{ yq_version }}/yq_linux_amd64"
+    dest: /usr/local/bin/yq
+    mode: "0755"
+    owner: root
+    group: root
+    checksum: "{{ ('sha256:' ~ agent_yq_sha256) if agent_yq_sha256 | length > 0 else omit }}"
+    force: true
+  when:
+    - agent_install_yq | bool
+    - __agent_yq_check.rc != 0 or yq_version not in (__agent_yq_check.stdout | default(''))
+  tags: [yq, binaries]
+
+# ── azcopy (packages.txt 120-133) ────────────────────────────────────────────
+# aka.ms/downloadazcopy-v10-linux is a "latest" alias and cannot be pinned, so
+# this installs when absent and never upgrades; point agent_azcopy_url at a
+# versioned release and set agent_azcopy_sha256 to control the version.
+- name: Check the installed azcopy
+  ansible.builtin.command: azcopy --version
+  register: __agent_azcopy_check
+  failed_when: false
+  changed_when: false
+  when: agent_install_azcopy | bool
+  tags: [azcopy, binaries]
+
+- name: Download azcopy
+  ansible.builtin.get_url:
+    url: "{{ agent_azcopy_url }}"
+    dest: /tmp/azcopy_linux_amd64.tar.gz
+    mode: "0644"
+    checksum: "{{ ('sha256:' ~ agent_azcopy_sha256) if agent_azcopy_sha256 | length > 0 else omit }}"
+  when:
+    - agent_install_azcopy | bool
+    - __agent_azcopy_check.rc != 0
+  register: __agent_azcopy_download
+  tags: [azcopy, binaries]
+
+# The archive holds azcopy_linux_amd64_<version>/azcopy; --strip-components drops
+# that versioned directory so the install path does not depend on the version.
+- name: Install azcopy
+  ansible.builtin.unarchive:
+    src: /tmp/azcopy_linux_amd64.tar.gz
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: [--strip-components=1, --wildcards, "*/azcopy"]
+  when: __agent_azcopy_download is not skipped
+  tags: [azcopy, binaries]
+
+- name: Ensure azcopy is executable
+  ansible.builtin.file:
+    path: /usr/local/bin/azcopy
+    mode: "0755"
+    owner: root
+    group: root
+  when: __agent_azcopy_download is not skipped
+  tags: [azcopy, binaries]
+
+- name: Remove the azcopy download
+  ansible.builtin.file:
+    path: /tmp/azcopy_linux_amd64.tar.gz
+    state: absent
+  when: __agent_azcopy_download is not skipped
+  tags: [azcopy, binaries, cleanup]

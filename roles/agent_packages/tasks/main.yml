@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# Build-agent tooling — Ubuntu, Debian, RHEL and CentOS Stream
+# =============================================================================
+# Installs what packages.txt lists for a build agent. Dispatch is by
+# `ansible_os_family`, as in roles/mssql and roles/jumpservers; preflight then
+# narrows to the four distributions and releases that were checked.
+#
+# WHAT IS GENUINELY OS-SPECIFIC, and therefore all that is split:
+#   - repositories (apt keyring + sources vs yum_repository)
+#   - the module that installs (apt vs dnf)
+# Package names are data, not branches — see __agent_catalog in vars/main.yml.
+# Downloaded binaries, post-install steps and verification are identical on
+# every family and are not split.
+#
+# ⚑ gather_facts MUST STAY ON. Everything here reads ansible_distribution,
+#   ansible_distribution_version and ansible_os_family.
+#
+#   ansible-playbook playbooks/setup-agent.yml --tags preflight    # validate only
+#   ansible-playbook playbooks/setup-agent.yml --tags packages     # this role only
+# =============================================================================
+
+- name: Preflight validation
+  ansible.builtin.import_tasks: preflight.yml
+  tags: [always]
+
+- name: Register repositories (Debian family)
+  ansible.builtin.include_tasks: repos-debian.yml
+  when: ansible_os_family == "Debian"
+  tags: [repo, debian]
+
+- name: Register repositories (RedHat family)
+  ansible.builtin.include_tasks: repos-redhat.yml
+  when: ansible_os_family == "RedHat"
+  tags: [repo, redhat]
+
+- name: Install packages
+  ansible.builtin.import_tasks: install.yml
+
+- name: Install downloaded binaries
+  ansible.builtin.import_tasks: binaries.yml
+
+- name: Post-install configuration
+  ansible.builtin.import_tasks: post.yml
+
+- name: Verify the installation
+  ansible.builtin.import_tasks: verify.yml

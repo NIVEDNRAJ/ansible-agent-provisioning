@@ -1,0 +1,78 @@
+---
+- name: Gather what the agent directory holds
+  ansible.builtin.stat:
+    path: "{{ agent.root }}/{{ item }}"
+  loop: [.agent, .credentials, .credentials_rsaparams, .ansible-pat, .service]
+  register: files
+
+- name: Index the results
+  ansible.builtin.set_fact:
+    f: "{{ dict(files.results | map(attribute='item') | zip(files.results | map(attribute='stat'))) }}"
+
+- name: The agent is registered and owned by the agent user
+  ansible.builtin.assert:
+    that:
+      - f['.agent'].exists
+      - f['.agent'].pw_name == 'azagent'
+      - f['.credentials'].exists
+      - f['.credentials'].mode == '0600'
+      - f['.credentials_rsaparams'].mode == '0600'
+      - f['.credentials'].pw_name == 'azagent'
+    fail_msg: "{{ agent.name }}: registration state wrong: {{ f }}"
+    quiet: true
+
+- name: The staged PAT file is gone
+  ansible.builtin.assert:
+    that:
+      - not f['.ansible-pat'].exists
+    quiet: true
+
+# ── how the PAT travelled ────────────────────────────────────────────────────
+- name: Read what config.sh handed to the agent binary
+  ansible.builtin.slurp:
+    src: "{{ agent.root }}/{{ item }}"
+  loop: [_shim-argv.txt, _shim-env.txt, _shim-ps.txt]
+  register: seen
+
+- name: The PAT reached config.sh only through the environment
+  ansible.builtin.assert:
+    that:
+      # reached the agent binary, in its environment
+      - (seen.results[1].content | b64decode | trim) == 'set'
+      # not on its command line
+      - pat_sentinel not in (seen.results[0].content | b64decode)
+      # not on ANY command line on the host while it ran (and the snapshot did capture ours)
+      - "'--unattended' in (seen.results[2].content | b64decode)"
+      - pat_sentinel not in (seen.results[2].content | b64decode)
+    fail_msg: "{{ agent.name }}: the PAT was visible on a command line, or the snapshot missed the run"
+    quiet: true
+
+# ── service ──────────────────────────────────────────────────────────────────
+- name: The service is installed only when expected
+  ansible.builtin.assert:
+    that:
+      - f['.service'].exists == (expect_services | bool)
+    fail_msg: "{{ agent.name }}: .service exists={{ f['.service'].exists }}, expected {{ expect_services }}"
+    quiet: true
+
+- name: The service is active and enabled
+  when: expect_services | bool
+  block:
+    - name: Read the unit name
+      ansible.builtin.slurp:
+        src: "{{ agent.root }}/.service"
+      register: unit
+
+    - name: Ask systemd
+      ansible.builtin.command:
+        argv: ["systemctl", "{{ item }}", "{{ unit.content | b64decode | trim }}"]
+      loop: [is-active, is-enabled]
+      register: asked
+      changed_when: false
+
+    - name: Both answers are positive
+      ansible.builtin.assert:
+        that:
+          - asked.results[0].stdout == 'active'
+          - asked.results[1].stdout == 'enabled'
+        quiet: true

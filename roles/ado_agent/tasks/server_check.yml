@@ -1,0 +1,126 @@
+---
+# =============================================================================
+# Ask the server — read-only, runs on the host the agent will connect from
+# =============================================================================
+# Three things go wrong at registration and are reported as one opaque error by
+# config.sh: the server cannot be reached, the PAT is refused, the pool is not there.
+# This tells them apart BEFORE anything is installed, and also asks which agent the
+# server ships, because the agent major version has to suit the server.
+#
+# Read-only GETs, so they also run under --check. The PAT is sent as the Basic-auth
+# password; the uri tasks have no_log and the PAT is not in any message below.
+
+- name: Normalise the server URL
+  ansible.builtin.set_fact:
+    __ado_server: "{{ ado_org_url | regex_replace('/+$', '') }}"
+  tags: [preflight, server]
+
+- name: Ask the server for the pool
+  ansible.builtin.uri:
+    url: "{{ __ado_server }}/_apis/distributedtask/pools?poolName={{ ado_agent_pool | urlencode }}&api-version={{ ado_agent_api_version }}"
+    headers:
+      Authorization: "Basic {{ (':' ~ (ado_pat | trim)) | b64encode }}"
+    return_content: true
+    status_code: [200, 401, 403, 404]
+    timeout: 20
+  register: __ado_pool_reply
+  failed_when: false
+  check_mode: false
+  changed_when: false
+  no_log: true
+  tags: [preflight, server]
+
+- name: The server must answer and accept the PAT
+  ansible.builtin.assert:
+    that:
+      - __ado_pool_reply.status is defined
+      - __ado_pool_reply.status | int != -1
+    fail_msg: >-
+      {{ __ado_server }} could not be reached from {{ inventory_hostname }}:
+      {{ __ado_pool_reply.msg | default('no response') }}.
+      Check DNS, routing and the firewall from the host, and that the URL and port are right.
+    success_msg: "{{ __ado_server }} answered"
+  tags: [preflight, server]
+
+- name: The PAT must be accepted, and be allowed to read agent pools
+  ansible.builtin.assert:
+    that:
+      - __ado_pool_reply.status | int == 200
+    fail_msg: >-
+      {{ __ado_server }} answered HTTP {{ __ado_pool_reply.status }}:
+      {{ {401: 'the PAT was rejected (wrong, expired, revoked, or for another organisation)',
+          403: 'the PAT is valid but lacks the Agent Pools (Read & manage) scope',
+          404: 'there is no such endpoint — check the URL; an on-premises server often needs its collection in the path, e.g. https://host:8082/tfs/DefaultCollection'
+         }.get(__ado_pool_reply.status | int, 'an unexpected response') }}.
+    success_msg: "The PAT was accepted"
+  tags: [preflight, server]
+
+- name: The pool must exist
+  ansible.builtin.assert:
+    that:
+      - (__ado_pool_reply.json.count | default(0) | int) > 0
+    fail_msg: >-
+      {{ __ado_server }} has no agent pool named '{{ ado_agent_pool }}'. The pool is
+      not created by this project; create it first, or fix ado_agent_pool.
+    success_msg: "Pool '{{ ado_agent_pool }}' exists"
+  tags: [preflight, server]
+
+# ── which agent does this server ship? ───────────────────────────────────────
+- name: Ask the server which Linux agent it ships
+  ansible.builtin.uri:
+    url: "{{ __ado_server }}/_apis/distributedtask/packages/agent?platform=linux-x64&$top=1&api-version={{ ado_agent_api_version }}"
+    headers:
+      Authorization: "Basic {{ (':' ~ (ado_pat | trim)) | b64encode }}"
+    return_content: true
+    status_code: [200, 401, 403, 404]
+    timeout: 20
+  register: __ado_pkg_reply
+  failed_when: false
+  check_mode: false
+  changed_when: false
+  no_log: true
+  tags: [preflight, server]
+
+- name: Work out the server's agent version
+  ansible.builtin.set_fact:
+    __ado_server_agent: >-
+      {{ (__ado_pkg_reply.json.value[0].version | default(''))
+         if (__ado_pkg_reply.status | default(0) | int) == 200 else '' }}
+  tags: [preflight, server]
+
+- name: Compare the major versions
+  ansible.builtin.set_fact:
+    __ado_pinned_major: "{{ ado_agent_version.split('.')[0] }}"
+    __ado_server_major: "{{ __ado_server_agent.split('.')[0] if __ado_server_agent | length > 0 else '' }}"
+  tags: [preflight, server]
+
+- name: State the agent / server compatibility
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('Could not read the agent version ' ~ __ado_server ~ ' ships, so compatibility of the pinned agent '
+          ~ ado_agent_version ~ ' with this server is UNVERIFIED. Check its Agent pools > Download agent page.')
+         if __ado_server_major | length == 0 else
+         ('Pinned agent ' ~ ado_agent_version ~ ' has the same major version as the agent this server ships ('
+          ~ __ado_server_agent ~ ').')
+         if __ado_server_major == __ado_pinned_major else
+         ('WARNING: the pinned agent ' ~ ado_agent_version ~ ' has a different major version from the agent this server ships ('
+          ~ __ado_server_agent ~ '). Set ado_agent_version to a ' ~ __ado_server_major
+          ~ '.x release unless you have confirmed this server supports ' ~ __ado_pinned_major ~ '.x.') }}
+  tags: [preflight, server]
+
+# ⚑ A KNOWN MISMATCH STOPS THE RUN. An agent of a major version the server does not
+#   support either fails to register or registers and misbehaves, and the run's output
+#   is long enough to bury a warning. "The server did not say" is only a warning above
+#   — it is not evidence of a mismatch.
+- name: Refuse an agent major version the server does not ship
+  ansible.builtin.assert:
+    that:
+      - __ado_server_major | length == 0 or __ado_server_major == __ado_pinned_major
+    fail_msg: >-
+      The pinned agent {{ ado_agent_version }} (major {{ __ado_pinned_major }}) does not match what the
+      server ships ('{{ __ado_server_agent }}'). Set ado_agent_version to a {{ __ado_server_major }}.x
+      release, or set ado_agent_enforce_server_version: false once you have confirmed this server
+      supports {{ __ado_pinned_major }}.x.
+    success_msg: "The pinned agent suits the server, or the server did not say"
+  when: ado_agent_enforce_server_version | bool
+  tags: [preflight, server]

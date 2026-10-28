@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# Work out which agents to provision — pure computation, changes nothing
+# =============================================================================
+# Result: __ado_instances, a list of {number, root, name}, one per agent. Everything
+# after this loops over it, so one agent and four agents are the same code.
+
+- name: Validate the agent numbering
+  ansible.builtin.assert:
+    that:
+      - ado_agent_numbers is sequence
+      - ado_agent_numbers is not string
+      - ado_agent_numbers | length > 0
+      - ado_agent_numbers | map('string') | select('match', '^[1-9][0-9]*$') | list | length == ado_agent_numbers | length
+      - ado_agent_numbers | map('int') | unique | list | length == ado_agent_numbers | length
+    fail_msg: >-
+      ado_agent_numbers must be a non-empty list of distinct positive integers,
+      e.g. [1, 2, 3]; got {{ ado_agent_numbers }}.
+    success_msg: "Agent numbers are valid"
+  when: ado_agent_root | length == 0
+  tags: [preflight, validate]
+
+- name: Start from an empty agent list
+  ansible.builtin.set_fact:
+    __ado_instances: []
+  tags: [preflight, validate]
+
+- name: Compute the agent list
+  ansible.builtin.set_fact:
+    __ado_instances: >-
+      {{ __ado_instances + [{
+           'number': item | int,
+           'root': (ado_agent_root if ado_agent_root | length > 0 else ado_agents_dir ~ '/agent' ~ item),
+           'name': (ado_agent_names.get(item | int) or ado_agent_names.get(item | string)
+                    or (ado_agent_name if (ado_agent_root | length > 0 or ado_agent_numbers | length == 1)
+                        else ado_agent_name ~ '-' ~ item))
+         }] }}
+  loop: "{{ [1] if ado_agent_root | length > 0 else ado_agent_numbers }}"
+  tags: [preflight, validate]
+
+- name: Validate the computed agents
+  ansible.builtin.assert:
+    that:
+      - __ado_instances | map(attribute='name') | unique | list | length == __ado_instances | length
+      - __ado_instances | map(attribute='root') | unique | list | length == __ado_instances | length
+      - __ado_instances | map(attribute='name') | select('match', '^[A-Za-z0-9._-]+$') | list | length == __ado_instances | length
+      - __ado_instances | map(attribute='root') | select('match', '^/[^/]+(/[^/]+)*$') | list | length == __ado_instances | length
+    fail_msg: >-
+      Agent names must be unique and use only letters, digits, dot, underscore and
+      hyphen; agent directories must be unique absolute paths other than /.
+      Computed: {{ __ado_instances }}.
+    success_msg: "Agents: {{ __ado_instances | map(attribute='name') | join(', ') }}"
+  tags: [preflight, validate]

@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# RedHat family (RHEL, CentOS Stream) — third-party repositories
+# =============================================================================
+# .NET, Java, Maven and Python come from the distribution's own repositories;
+# only Microsoft (sqlcmd), Docker and NodeSource are added.
+
+# ⚑ MICROSOFT'S RHEL 9 FEED ALSO PUBLISHES dotnet-sdk-8.0 (checked: ~85 versions of
+#   it), alongside AppStream's. dnf takes the highest across repositories, so an
+#   unguarded repo mixes the two builds. Microsoft's own guidance is that .NET on
+#   RHEL comes from the RHEL repositories, so the feed is registered with .NET
+#   packages excluded — which is why this is yum_repository and not the get_url of
+#   prod.repo that Core Infra uses.
+#
+#   The file name is msprod.repo, the same name roles/mssql/tasks/tools-redhat.yml
+#   uses, so a host running both has one definition rather than a duplicate id.
+#   If that role runs afterwards its get_url replaces this file without the
+#   exclude; the next run of this role puts it back.
+- name: Register the Microsoft prod repository (RHEL/CentOS)
+  ansible.builtin.yum_repository:
+    name: packages-microsoft-com-prod
+    file: msprod
+    description: Microsoft Production
+    baseurl: "https://packages.microsoft.com/rhel/{{ ansible_distribution_major_version }}/prod/"
+    gpgcheck: true
+    gpgkey: https://packages.microsoft.com/keys/microsoft.asc
+    exclude: "dotnet* aspnetcore* netstandard*"
+    enabled: true
+  when: agent_install_sqlcmd | bool
+  tags: [repo, redhat]
+
+# ── Docker CE (packages.txt: get.docker.com) ─────────────────────────────────
+# ⚑ /linux/rhel for RHEL, /linux/centos for CentOS. roles/jumpservers uses
+#   /linux/centos for both, which Docker does not publish RHEL builds under.
+- name: Register the Docker repository (RHEL/CentOS)
+  ansible.builtin.yum_repository:
+    name: docker-ce
+    description: Docker CE Repository
+    baseurl: "https://download.docker.com/linux/{{ __agent_docker_rpm_distro }}/{{ ansible_distribution_major_version }}/$basearch/stable"
+    gpgcheck: true
+    gpgkey: "https://download.docker.com/linux/{{ __agent_docker_rpm_distro }}/gpg"
+    enabled: true
+  when: install_docker | bool
+  tags: [repo, docker, redhat]
+
+# ── NodeSource: one Node major on every distro ───────────────────────────────
+# ⚑ module_hotfixes: RHEL 8/9 AppStream carries nodejs as a module, and dnf hides
+#   non-modular packages of the same name from other repositories unless the
+#   repository opts out of that filtering.
+# ⚑ The key URL ends in .key and some firewalls block that file type — see the
+#   note in repos-debian.yml. Set agent_nodesource_rpm_key_url to a mirror.
+- name: Register the NodeSource repository (RHEL/CentOS)
+  ansible.builtin.yum_repository:
+    name: nodesource-nodejs
+    description: "Node.js {{ agent_nodejs_major }}.x - $basearch"
+    baseurl: "https://rpm.nodesource.com/pub_{{ agent_nodejs_major }}.x/nodistro/nodejs/$basearch"
+    gpgcheck: true
+    gpgkey: "{{ agent_nodesource_rpm_key_url }}"
+    module_hotfixes: true
+    enabled: true
+  when: agent_install_nodejs | bool
+  tags: [repo, nodejs, redhat]

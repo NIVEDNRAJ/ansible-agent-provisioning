@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# The ado_agent role on a disposable systemd host
+# =============================================================================
+# Driven by tests/run-service-test.sh, which supplies the variables and an agent archive
+# whose Agent.Listener is a test double (tests/fixtures/Agent.Listener.shim). The server
+# check is off: it is covered by tests/test_server_check.yml.
+#
+# become: true with `su` stands in for sudo, as in the other container tests.
+
+- name: Provision agents
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    ado_agent_server_check: false
+  roles:
+    - role: ado_agent

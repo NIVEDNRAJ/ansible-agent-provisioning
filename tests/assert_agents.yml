@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# Assertions about what the role left on the host
+# =============================================================================
+# Run by tests/run-service-test.sh after a provisioning run:
+#   -e '{"agents": [{"root": "/var/agents/agent1", "name": "t-1"}, ...],
+#        "expect_services": true, "pat_sentinel": "..."}'
+# Read-only.
+
+- name: Check the agents
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Check each agent directory
+      ansible.builtin.include_tasks: assert_one_agent.yml
+      loop: "{{ agents }}"
+      loop_control:
+        loop_var: agent
+        label: "{{ agent.name }}"
+
+    - name: The agent archive was cleaned up
+      ansible.builtin.stat:
+        path: "/var/cache/ado-agent/vsts-agent-linux-x64-4.261.0.tar.gz"
+      register: archive
+      failed_when: archive.stat.exists
+
+    - name: Collect the unit names
+      ansible.builtin.slurp:
+        src: "{{ item.root }}/.service"
+      loop: "{{ agents }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: units
+      when: expect_services | bool
+
+    - name: Each agent has its own unit
+      ansible.builtin.assert:
+        that:
+          - units.results | map(attribute='content') | map('b64decode') | unique | list | length == agents | length
+        quiet: true
+      when: expect_services | bool

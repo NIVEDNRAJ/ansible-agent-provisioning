@@ -1,0 +1,18 @@
+---
+# `vars:` on an include must be a literal mapping, so each variable a case may set is
+# named here with the role's default behind it.
+- name: Compute the agents
+  ansible.builtin.include_tasks: "{{ role_dir }}/tasks/instances.yml"
+  vars:
+    ado_agent_name: "{{ case.vars.ado_agent_name | default('') }}"
+    ado_agent_numbers: "{{ case.vars.ado_agent_numbers | default([1]) }}"
+    ado_agent_names: "{{ case.vars.ado_agent_names | default({}) }}"
+    ado_agents_dir: "{{ case.vars.ado_agents_dir | default('/var/agents') }}"
+    ado_agent_root: "{{ case.vars.ado_agent_root | default('') }}"
+
+- name: The computed agents are the expected ones
+  ansible.builtin.assert:
+    that:
+      - __ado_instances == case.expect
+    fail_msg: "{{ case.name }}: expected {{ case.expect }}, got {{ __ado_instances }}"
+    quiet: true

@@ -1,0 +1,74 @@
+#!/bin/bash
+# TEST DOUBLE for the agent's bin/Agent.Listener — used only by tests/run-service-test.sh.
+#
+# It replaces ONE thing: the network registration against Azure DevOps, which a test cannot
+# do without a real server and PAT. Everything around it is the real agent archive: the
+# real config.sh, runsvc.sh, the real systemd unit and svc.sh templates, and the real node
+# runtime that AgentService.js runs on.
+#
+# `configure` does what the real one leaves behind on success: .agent, .credentials,
+# .credentials_rsaparams and a svc.sh generated from bin/systemd.svc.sh.template. Before
+# that it records what it was given, so the test can prove how the PAT arrived:
+#   _shim-argv.txt   the arguments            (must NOT contain the PAT)
+#   _shim-env.txt    whether the PAT was in the environment
+#   _shim-ps.txt     the whole process list at that moment (must NOT contain the PAT)
+#
+# An agent whose name contains "fail"  → configure fails, echoing the token the way a
+#                                          server error might (to test redaction).
+# An agent whose name contains "crash" → configure succeeds, but the service process
+#                                          exits at once (to test failure diagnostics).
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  configure)
+    printf '%s\n' "$@" > _shim-argv.txt
+    printf '%s\n' "${VSTS_AGENT_INPUT_TOKEN:+set}" > _shim-env.txt
+    ps -eo args > _shim-ps.txt 2>&1
+
+    url="" pool="" agent="" work=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --url) url="$2"; shift 2 ;;
+        --pool) pool="$2"; shift 2 ;;
+        --agent) agent="$2"; shift 2 ;;
+        --work) work="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    if [[ -z "${VSTS_AGENT_INPUT_TOKEN:-}" ]]; then
+      echo "Invalid configuration provided for token. Terminating unattended configuration." >&2
+      exit 1
+    fi
+    if [[ "$agent" == *fail* ]]; then
+      echo "VS30063: You are not authorized to access ${url}. Token used: ${VSTS_AGENT_INPUT_TOKEN}" >&2
+      exit 1
+    fi
+
+    printf '{"agentName":"%s","poolName":"%s","serverUrl":"%s","workFolder":"%s"}\n' \
+      "$agent" "$pool" "$url" "$work" > .agent
+    # 0644 on purpose: the role must tighten these whatever the agent created them as.
+    (umask 022; echo '{}' > .credentials; echo '{}' > .credentials_rsaparams)
+
+    host="$(echo "$url" | sed -E 's#^https?://([^/:]+).*#\1#')"
+    sed "s|{{SvcNameVar}}|vsts.agent.${host}.${pool}.${agent}.service|; s|{{SvcDescription}}|Azure Pipelines Agent (${host}.${pool}.${agent})|" \
+      bin/systemd.svc.sh.template > svc.sh
+    chmod 755 svc.sh
+    ;;
+  run)
+    if grep -q '"agentName":"[^"]*crash' .agent 2>/dev/null; then
+      echo "shim: simulated agent crash" >&2
+      exit 1
+    fi
+    exec sleep infinity
+    ;;
+  --version)
+    echo "4.261.0"
+    ;;
+  *)
+    echo "shim: unsupported command $cmd" >&2
+    exit 2
+    ;;
+esac

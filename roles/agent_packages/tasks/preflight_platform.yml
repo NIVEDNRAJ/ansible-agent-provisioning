@@ -1,0 +1,46 @@
+---
+# =============================================================================
+# Platform check — read-only, shared with roles/ado_agent
+# =============================================================================
+# ⚑ REFUSE, DON'T SKIP. Every OS-specific task in this role is guarded by
+#   `when: ansible_os_family == ...`. On a platform that matches none of them the
+#   role would change nothing and report ok=N changed=0 — a green run that
+#   provisioned no agent. Same reasoning as roles/mssql/tasks/preflight.yml, with
+#   a narrower allow-list (see agent_supported_platforms in vars/main.yml).
+#
+# ⚑ ansible_distribution, NOT ansible_os_family, decides support. A Rocky, Alma
+#   or Oracle Linux host reports os_family RedHat and would pass a family check
+#   against repositories that were never tested for it.
+# =============================================================================
+
+- name: Verify the distribution is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution in agent_supported_platforms
+    fail_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_version }} is not supported.
+      Supported distributions: {{ agent_supported_platforms.keys() | list | join(', ') }}.
+    success_msg: "{{ ansible_distribution }} is a supported distribution"
+  tags: [always, preflight, validate]
+
+- name: Verify the release is supported
+  ansible.builtin.assert:
+    that:
+      - __agent_platform_version in agent_supported_platforms[ansible_distribution]
+    fail_msg: >-
+      {{ ansible_distribution }} {{ __agent_platform_version }} is not supported.
+      Supported {{ ansible_distribution }} releases:
+      {{ agent_supported_platforms[ansible_distribution] | join(', ') }}.
+      See the comment above agent_supported_platforms for why other releases are out.
+    success_msg: "{{ ansible_distribution }} {{ __agent_platform_version }} is supported"
+  tags: [always, preflight, validate]
+
+- name: Verify the architecture is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture == 'x86_64'
+    fail_msg: >-
+      Architecture '{{ ansible_architecture }}' is not supported. The binary downloads
+      (kubectl, helm, yq, azcopy) and packages.txt are x86_64 / amd64 only.
+    success_msg: "x86_64 is supported"
+  tags: [always, preflight, validate]

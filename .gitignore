@@ -1,0 +1,6 @@
+.vault_pass
+*.retry
+inventory/hosts.local.yml
+group_vars/vault.yml
+NuGet.Config
+.venv

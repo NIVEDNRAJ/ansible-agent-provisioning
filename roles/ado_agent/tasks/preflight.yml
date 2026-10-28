@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# Platform check — the only part of preflight that runs on EVERY tag
+# =============================================================================
+# One support matrix for both roles: agent_packages owns it. The parameter checks
+# (params.yml) and the server check (server_check.yml) are tagged `agent` /
+# `preflight`, so a tooling-only run (--tags packages) needs no PAT, pool or server.
+
+- name: Verify the platform
+  ansible.builtin.include_role:
+    name: agent_packages
+    tasks_from: preflight_platform
+  tags: [always, preflight, validate]

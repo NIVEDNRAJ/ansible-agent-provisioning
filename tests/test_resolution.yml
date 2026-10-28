@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Package selection, platform support and packages.txt traceability
+# =============================================================================
+# Runs against MOCKED facts on localhost — nothing is installed and no host is
+# contacted. It exercises the real role files: the catalog in vars/main.yml and the
+# real preflight_platform.yml, once per platform in fixtures/platforms.yml.
+#
+#   ansible-playbook tests/test_resolution.yml
+#
+# What this proves: that for each distribution the role would ask the package
+# manager for the names it should, and refuses the platforms it should refuse.
+# What it does NOT prove: that those packages exist in the repositories — that is
+# tests/run-matrix.sh, against real ones.
+# =============================================================================
+
+- name: Resolve packages and platform support from mocked facts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    role_dir: "{{ playbook_dir }}/../roles/agent_packages"
+    platforms: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/fixtures/platforms.yml') | from_yaml }}"
+    manifest: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/fixtures/packages-txt-manifest.yml') | from_yaml }}"
+
+  tasks:
+    - name: Load the role's defaults and internal variables
+      ansible.builtin.include_vars: "{{ item }}"
+      loop:
+        - "{{ role_dir }}/defaults/main.yml"
+        - "{{ role_dir }}/vars/main.yml"
+
+    # ── supported platforms: the right names, per family ──────────────────────
+    - name: Check each supported platform
+      ansible.builtin.include_tasks: check_supported.yml
+      loop: "{{ platforms.supported }}"
+      loop_control:
+        loop_var: platform
+        label: "{{ platform.name }}"
+
+    # ── unsupported platforms: refused, and the reason names the platform ─────
+    - name: Check each unsupported platform is refused
+      ansible.builtin.include_tasks: check_unsupported.yml
+      loop: "{{ platforms.unsupported }}"
+      loop_control:
+        loop_var: platform
+        label: "{{ platform.name }}"
+
+    # ── packages.txt traceability ─────────────────────────────────────────────
+    - name: Check every packages.txt item is accounted for
+      ansible.builtin.include_tasks: check_manifest.yml
+      loop: "{{ manifest['items'] }}"
+      loop_control:
+        loop_var: item_entry
+        label: "{{ item_entry.id }}"
+
+    # ── configuration switches ────────────────────────────────────────────────
+    - name: Check the configuration switches
+      ansible.builtin.include_tasks: check_switches.yml
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ platforms.supported | length }} supported and
+          {{ platforms.unsupported | length }} unsupported platforms,
+          {{ manifest['items'] | length }} packages.txt items, switches — all as expected.

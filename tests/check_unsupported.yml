@@ -1,0 +1,23 @@
+---
+- name: Mock the facts
+  ansible.builtin.include_tasks: _set_facts.yml
+
+- name: "Preflight is attempted for {{ platform.name }}"
+  block:
+    - name: Run the real preflight
+      ansible.builtin.include_tasks: "{{ role_dir }}/tasks/preflight_platform.yml"
+
+    - name: "Fail because the platform was accepted: {{ platform.name }}"
+      ansible.builtin.fail:
+        msg: "{{ platform.name }} should have been refused by preflight_platform.yml and was not."
+
+  rescue:
+    # A rescue also catches the fail above; tell the two apart by its message.
+    - name: "The refusal is the preflight's, not the test's"
+      ansible.builtin.assert:
+        that:
+          - "'should have been refused' not in ansible_failed_result.msg"
+          - "'not supported' in ansible_failed_result.msg"
+          - platform.facts.distribution in ansible_failed_result.msg or platform.arch is defined
+        fail_msg: "{{ platform.name }}: unexpected failure: {{ ansible_failed_result.msg }}"
+        quiet: true

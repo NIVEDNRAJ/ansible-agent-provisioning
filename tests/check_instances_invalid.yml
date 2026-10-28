@@ -1,0 +1,25 @@
+---
+- name: Attempt the case
+  block:
+    - name: Compute the agents
+      ansible.builtin.include_tasks: "{{ role_dir }}/tasks/instances.yml"
+      vars:
+        ado_agent_name: "{{ case.vars.ado_agent_name | default('') }}"
+        ado_agent_numbers: "{{ case.vars.ado_agent_numbers | default([1]) }}"
+        ado_agent_names: "{{ case.vars.ado_agent_names | default({}) }}"
+        ado_agents_dir: "{{ case.vars.ado_agents_dir | default('/var/agents') }}"
+        ado_agent_root: "{{ case.vars.ado_agent_root | default('') }}"
+
+    - name: Fail because the case was accepted
+      ansible.builtin.fail:
+        msg: "{{ case.name }} should have been refused and was not."
+
+  rescue:
+    - name: The refusal is the role's, not the test's
+      ansible.builtin.assert:
+        that:
+          - "'should have been refused' not in ansible_failed_result.msg"
+          # one of the role's own validation messages, not some unrelated error
+          - ansible_failed_result.msg is match('(?s).*(ado_agent_numbers must be|Agent names must be unique).*')
+        fail_msg: "{{ case.name }}: unexpected failure: {{ ansible_failed_result.msg }}"
+        quiet: true

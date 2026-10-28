@@ -1,0 +1,33 @@
+---
+# Group to add to ansible/inventory.yml, written the way the other groups are
+# (agentservers, like jumpservers / sftpservers). Hosts and pool are placeholders.
+#
+# ⚑ NO PASSWORDS HERE. The other groups in inventory.yml hold ansible_ssh_pass and
+#   ansible_become_pass in plain text; do not copy that. Use a key (ansible_ssh_private_key_file)
+#   and sudo without a password, or put the secrets in Ansible Vault.
+# ⚑ THE PAT IS NOT AN INVENTORY VARIABLE. Put `vault_ado_pat` in an Ansible Vault file
+#   (ansible-vault create group_vars/vault.yml) and run with --ask-vault-pass, or export
+#   ADO_PAT in the controller shell. The role reads whichever it finds, vault first.
+agentservers:
+  hosts:
+    agent_01:
+      ansible_host: 10.15.0.50
+      ansible_user: devopsadmin
+      ansible_ssh_private_key_file: ~/.ssh/agent_vm_key
+      ado_org_url: https://ntp-tfs.nestdigital.com:8082/
+      ado_agent_pool: TransactHub-Pool
+      ado_agent_name: transacthub-agent-01
+      # Three agents on this host: /var/agents/agent1..3, named transacthub-agent-01-1..3.
+      # To keep an existing name for agent 1, pin it:  ado_agent_names: {1: transacthub-agent-01}
+      # ado_agent_numbers: [1, 2, 3]
+      # ⚑ Confirm the agent major version suits the server (README, "Server compatibility"):
+      # ado_agent_version: "3.x.y"
+      # Optional — values shown are the defaults:
+      # install_docker: false                  # true adds Docker CE and docker-group access
+      # kubectl_version: "v1.30.4"             # same names as jumpservers.yml uses
+      # helm_version: "3.19.4"
+      # yq_version: "4.44.5"
+      # agent_nodejs_major: 22
+      # agent_mssql_tools_package: mssql-tools # mssql-tools18 is what roles/mssql installs
+      # agent_nuget_config_src: /secure/path/NuGet.Config   # holds a PAT — outside the repo
+      # ado_agent_package_src: /secure/path/vsts-agent-linux-x64-3.x.y.tar.gz   # no route to the download URL

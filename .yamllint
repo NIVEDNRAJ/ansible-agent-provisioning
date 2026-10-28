@@ -1,0 +1,24 @@
+---
+extends: default
+
+# integration/ is written in Core Infra's own playbook style (`become: yes`,
+# `{ role: ../roles/x/ }`) so it drops in unchanged; it is syntax-checked instead.
+ignore: |
+  integration/
+
+rules:
+  # Role comments carry the reasoning behind a choice and run long.
+  line-length:
+    max: 200
+  # Comment blocks sit at the indentation of the task they explain, or one level up.
+  comments-indentation: disable
+  # The values ansible-lint requires, so the two tools agree.
+  comments:
+    min-spaces-from-content: 1
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  truthy:
+    allowed-values: ["true", "false"]

@@ -1,0 +1,3 @@
+---
+# Internal to roles/ado_agent; not for override.
+__ado_archive: "{{ ado_agent_cache_dir }}/vsts-agent-linux-{{ ado_agent_arch }}-{{ ado_agent_version }}.tar.gz"

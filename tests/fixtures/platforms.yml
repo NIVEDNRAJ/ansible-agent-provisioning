@@ -1,0 +1,84 @@
+---
+# Mocked Ansible facts and what the role must resolve for them.
+# Used by tests/test_resolution.yml; no host is contacted.
+#
+#   facts      the gathered facts the role reads
+#   include    packages that must be in agent_resolved_packages
+#   exclude    packages that must NOT be (a wrong-family name, or the original's)
+#   expect     internal decisions the role makes for this platform
+
+supported:
+  - name: ubuntu-20.04
+    facts: {distribution: Ubuntu, version: "20.04", major: "20", release: focal, family: Debian}
+    include: [openjdk-17-jdk, unixodbc-dev, libicu66, mssql-tools, dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0, nodejs, maven, python3-venv, git, acl]
+    exclude: [unixODBC-devel, java-17-openjdk-devel, npm, libicu70]
+    expect: {dotnet_from_ubuntu_feed: false, need_ms_repo: true, ms_deb_path: "ubuntu/20.04", docker_distro: ubuntu}
+
+  - name: ubuntu-22.04
+    facts: {distribution: Ubuntu, version: "22.04", major: "22", release: jammy, family: Debian}
+    include: [openjdk-17-jdk, unixodbc-dev, libicu70, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-venv]
+    exclude: [unixODBC-devel, npm, libicu66]
+    expect: {dotnet_from_ubuntu_feed: true, need_ms_repo: true, ms_deb_path: "ubuntu/22.04", docker_distro: ubuntu}
+
+  - name: ubuntu-24.04
+    facts: {distribution: Ubuntu, version: "24.04", major: "24", release: noble, family: Debian}
+    include: [openjdk-17-jdk, unixodbc-dev, libicu74, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    exclude: [unixODBC-devel, npm, libicu70]
+    expect: {dotnet_from_ubuntu_feed: true, need_ms_repo: true, ms_deb_path: "ubuntu/24.04", docker_distro: ubuntu}
+
+  - name: debian-12
+    facts: {distribution: Debian, version: "12.9", major: "12", release: bookworm, family: Debian}
+    # libicu72 is the one installdependencies.sh cannot install.
+    include: [openjdk-17-jdk, unixodbc-dev, libicu72, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-venv]
+    exclude: [unixODBC-devel, npm, libicu67]
+    expect: {dotnet_from_ubuntu_feed: false, need_ms_repo: true, ms_deb_path: "debian/12", docker_distro: debian}
+
+  - name: centos-stream-9
+    facts: {distribution: CentOS, version: "9", major: "9", release: Stream, family: RedHat}
+    include: [java-17-openjdk-devel, unixODBC-devel, libicu, mssql-tools, dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0, nodejs, maven, python3-pip]
+    exclude: [openjdk-17-jdk, unixodbc-dev, npm, python3-venv, java-21-openjdk-devel]
+    expect: {need_ms_repo: true, crb_repo: crb, docker_rpm_distro: centos, java_deviates: false}
+
+  - name: centos-stream-10
+    facts: {distribution: CentOS, version: "10", major: "10", release: Stream, family: RedHat}
+    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    exclude: [java-17-openjdk-devel, openjdk-17-jdk, npm]
+    expect: {need_ms_repo: true, crb_repo: crb, docker_rpm_distro: centos, java_deviates: true}
+
+  - name: rhel-8
+    facts: {distribution: RedHat, version: "8.10", major: "8", release: Ootpa, family: RedHat}
+    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-pip]
+    exclude: [openjdk-17-jdk, npm, java-21-openjdk-devel]
+    expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: false}
+
+  - name: rhel-9
+    facts: {distribution: RedHat, version: "9.6", major: "9", release: Plow, family: RedHat}
+    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    exclude: [openjdk-17-jdk, npm, java-21-openjdk-devel]
+    expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: false}
+
+  - name: rhel-10
+    facts: {distribution: RedHat, version: "10.0", major: "10", release: Coughlan, family: RedHat}
+    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    exclude: [java-17-openjdk-devel, openjdk-17-jdk, npm]
+    expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: true}
+
+# Each of these must be REFUSED by preflight_platform.yml, with the reason named.
+unsupported:
+  - {name: ubuntu-18.04, facts: {distribution: Ubuntu, version: "18.04", major: "18", release: bionic, family: Debian}}
+  - {name: ubuntu-26.04, facts: {distribution: Ubuntu, version: "26.04", major: "26", release: unknown, family: Debian}}
+  - {name: debian-11, facts: {distribution: Debian, version: "11.11", major: "11", release: bullseye, family: Debian}}
+  - {name: debian-10, facts: {distribution: Debian, version: "10.13", major: "10", release: buster, family: Debian}}
+  - {name: debian-13, facts: {distribution: Debian, version: "13.0", major: "13", release: trixie, family: Debian}}
+  - {name: centos-7, facts: {distribution: CentOS, version: "7.9", major: "7", release: Core, family: RedHat}}
+  - {name: centos-linux-8, facts: {distribution: CentOS, version: "8.5", major: "8", release: Core, family: RedHat}}
+  - {name: rhel-7, facts: {distribution: RedHat, version: "7.9", major: "7", release: Maipo, family: RedHat}}
+  - {name: rhel-11, facts: {distribution: RedHat, version: "11.0", major: "11", release: X, family: RedHat}}
+  - {name: rocky-9, facts: {distribution: Rocky, version: "9.4", major: "9", release: Blue, family: RedHat}}
+  - {name: almalinux-9, facts: {distribution: AlmaLinux, version: "9.4", major: "9", release: Seafoam, family: RedHat}}
+  - {name: oraclelinux-9, facts: {distribution: OracleLinux, version: "9.4", major: "9", release: X, family: RedHat}}
+  - {name: fedora-40, facts: {distribution: Fedora, version: "40", major: "40", release: X, family: RedHat}}
+  - {name: linuxmint-21, facts: {distribution: Linuxmint, version: "21.3", major: "21", release: virginia, family: Debian}}
+  - {name: alpine-3.20, facts: {distribution: Alpine, version: "3.20", major: "3", release: X, family: Alpine}}
+  - {name: sles-15, facts: {distribution: SLES, version: "15.5", major: "15", release: X, family: Suse}}
+  - {name: ubuntu-22.04-arm64, arch: aarch64, facts: {distribution: Ubuntu, version: "22.04", major: "22", release: jammy, family: Debian}}

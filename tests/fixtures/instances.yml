@@ -1,0 +1,58 @@
+---
+# Agent numbering cases for tests/test_instances.yml. `vars` are layered over the
+# role defaults; `expect` is the list of {number, root, name} that must result.
+
+valid:
+  - name: default is one agent in /var/agents/agent1, named as given
+    vars: {ado_agent_name: tfs-agent}
+    expect:
+      - {number: 1, root: /var/agents/agent1, name: tfs-agent}
+
+  - name: several agents are numbered and suffixed
+    vars: {ado_agent_name: tfs-agent, ado_agent_numbers: [1, 2, 3]}
+    expect:
+      - {number: 1, root: /var/agents/agent1, name: tfs-agent-1}
+      - {number: 2, root: /var/agents/agent2, name: tfs-agent-2}
+      - {number: 3, root: /var/agents/agent3, name: tfs-agent-3}
+
+  - name: numbers need not start at one or be contiguous
+    vars: {ado_agent_name: tfs-agent, ado_agent_numbers: [4, 7]}
+    expect:
+      - {number: 4, root: /var/agents/agent4, name: tfs-agent-4}
+      - {number: 7, root: /var/agents/agent7, name: tfs-agent-7}
+
+  - name: a pinned name keeps the first agent's name when a second is added
+    vars: {ado_agent_name: tfs-agent, ado_agent_numbers: [1, 2], ado_agent_names: {1: transacthub-agent-04}}
+    expect:
+      - {number: 1, root: /var/agents/agent1, name: transacthub-agent-04}
+      - {number: 2, root: /var/agents/agent2, name: tfs-agent-2}
+
+  - name: names given with string keys, as -e JSON delivers them
+    vars: {ado_agent_name: tfs-agent, ado_agent_numbers: [1, 2], ado_agent_names: {"2": second}}
+    expect:
+      - {number: 1, root: /var/agents/agent1, name: tfs-agent-1}
+      - {number: 2, root: /var/agents/agent2, name: second}
+
+  - name: another base directory
+    vars: {ado_agent_name: tfs-agent, ado_agents_dir: /srv/ci, ado_agent_numbers: [2]}
+    expect:
+      - {number: 2, root: /srv/ci/agent2, name: tfs-agent}
+
+  - name: legacy ado_agent_root is one agent in exactly that directory, numbering ignored
+    vars: {ado_agent_name: tfs-agent, ado_agent_root: /opt/azure-pipelines-agent, ado_agent_numbers: [5, 6]}
+    expect:
+      - {number: 1, root: /opt/azure-pipelines-agent, name: tfs-agent}
+
+# Each must be refused by tasks/instances.yml.
+invalid:
+  - {name: empty list, vars: {ado_agent_name: a, ado_agent_numbers: []}}
+  - {name: zero, vars: {ado_agent_name: a, ado_agent_numbers: [0, 1]}}
+  - {name: negative, vars: {ado_agent_name: a, ado_agent_numbers: [-1]}}
+  - {name: duplicate numbers, vars: {ado_agent_name: a, ado_agent_numbers: [1, 1]}}
+  - {name: not numbers, vars: {ado_agent_name: a, ado_agent_numbers: [one]}}
+  - {name: a string instead of a list, vars: {ado_agent_name: a, ado_agent_numbers: "1"}}
+  - {name: two agents with one name, vars: {ado_agent_name: a, ado_agent_numbers: [1, 2], ado_agent_names: {1: same, 2: same}}}
+  - {name: a name with a space, vars: {ado_agent_name: bad name}}
+  - {name: an empty name, vars: {ado_agent_name: ""}}
+  - {name: a relative directory, vars: {ado_agent_name: a, ado_agent_root: relative/path}}
+  - {name: the filesystem root, vars: {ado_agent_name: a, ado_agent_root: /}}

@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# Install the distribution packages
+# =============================================================================
+# agent_resolved_packages is built from the catalog in vars/main.yml; the Debian
+# and RedHat branches differ only in the module and its repository arguments.
+
+- name: Install packages (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: "{{ agent_resolved_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    ACCEPT_EULA: "Y"
+  when: ansible_os_family == "Debian"
+  tags: [packages, debian]
+
+# CRB is enabled for this transaction only. See agent_crb_repo.
+- name: Install packages (RHEL/CentOS)
+  ansible.builtin.dnf:
+    name: "{{ agent_resolved_packages }}"
+    state: present
+    enablerepo: "{{ agent_crb_repo if agent_install_sqlcmd | bool else omit }}"
+  environment:
+    ACCEPT_EULA: "Y"
+  when: ansible_os_family == "RedHat"
+  tags: [packages, redhat]
+
+- name: Report where the packages.txt Java requirement could not be met
+  ansible.builtin.debug:
+    msg: >-
+      packages.txt asks for JDK 17. {{ ansible_distribution }} {{ __agent_platform_version }}
+      does not ship it, so JDK {{ agent_java_major_redhat }} was installed instead.
+  when:
+    - agent_install_java | bool
+    - agent_java_deviates | bool
+  tags: [packages, java]

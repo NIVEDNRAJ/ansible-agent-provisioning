@@ -1,0 +1,25 @@
+---
+# Site values only. Every default — packages, versions, agent settings — lives in
+# the roles (roles/agent_packages/defaults, roles/ado_agent/defaults), so the roles
+# work unchanged when copied into Core Infra, where this file does not exist.
+#
+# ⚑ NO PAT HERE. The role reads it from the Ansible Vault variable `vault_ado_pat`
+#   (see "Secrets" in the README) or, failing that, the ADO_PAT environment variable.
+
+# The Azure DevOps Server / TFS the agents register with.
+ado_org_url: "https://ntp-tfs.nestdigital.com:8082/"
+ado_agent_pool: ""
+ado_agent_name: ""
+
+# ⚑ The agent major version must suit the server — see "Server compatibility" in the
+#   README. Preflight reports what this server ships; until that is confirmed, treat
+#   the default as unverified for this server.
+# ado_agent_version: "4.261.0"
+
+# Optional overrides, shown with their defaults:
+# ado_agent_numbers: [1]                  # [1, 2, 3] = three agents on the host
+# ado_agents_dir: /var/agents             # agents go in /var/agents/agent<N>
+# install_docker: false
+# kubectl_version: "v1.30.4"
+# helm_version: "3.19.4"
+# yq_version: "4.44.5"

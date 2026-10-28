@@ -1,0 +1,99 @@
+---
+# =============================================================================
+# Steps packages.txt does after the installs
+# =============================================================================
+
+# ── Maven (packages.txt 91-92) ───────────────────────────────────────────────
+# Some pipeline definitions call /opt/maven/bin/mvn directly.
+- name: Create the /opt/maven/bin directory
+  ansible.builtin.file:
+    path: /opt/maven/bin
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  when: agent_install_maven | bool
+  tags: [maven, config]
+
+- name: Link /opt/maven/bin/mvn to the packaged mvn
+  ansible.builtin.file:
+    src: /usr/share/maven/bin/mvn
+    dest: /opt/maven/bin/mvn
+    state: link
+  when: agent_install_maven | bool
+  tags: [maven, config]
+
+# ── sqlcmd on PATH ───────────────────────────────────────────────────────────
+# profile.d is what roles/jumpservers and roles/cdtool use, and it serves login
+# shells. The agent runs as a systemd service, which never reads profile.d, so
+# pipelines would not find sqlcmd — hence the links in /usr/local/bin as well.
+- name: Add the mssql-tools directory to PATH for login shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/mssql-tools.sh
+    content: |
+      export PATH="$PATH:{{ __agent_mssql_bin_dir }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: agent_install_sqlcmd | bool
+  tags: [sqlcmd, config]
+
+- name: Link sqlcmd and bcp into /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ __agent_mssql_bin_dir }}/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+  loop: [sqlcmd, bcp]
+  when: agent_install_sqlcmd | bool
+  tags: [sqlcmd, config]
+
+# ── dotnet-ef (packages.txt 29-35, 111) ──────────────────────────────────────
+# ⚑ --tool-path, NOT --global. `dotnet tool install --global` puts the tool in the
+#   installing user's ~/.dotnet/tools, which here would be root's — invisible to
+#   the agent user. A shared directory plus a link in /usr/local/bin is on every
+#   user's PATH, the agent service's included.
+# ⚑ `update --version` installs when absent and moves to the pinned version when
+#   present, in either direction, so one task covers packages.txt's install and
+#   update blocks.
+- name: Check the installed dotnet-ef
+  ansible.builtin.command: "{{ agent_dotnet_tools_dir }}/dotnet-ef --version"
+  register: __agent_dotnet_ef_check
+  failed_when: false
+  changed_when: false
+  when: agent_install_dotnet | bool
+  tags: [dotnet, dotnet-ef]
+
+- name: Install dotnet-ef at the pinned version
+  ansible.builtin.command: >-
+    dotnet tool update dotnet-ef
+    --tool-path {{ agent_dotnet_tools_dir }}
+    --version {{ agent_dotnet_ef_version }}
+  environment:
+    DOTNET_NOLOGO: "1"
+    DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  register: __agent_dotnet_ef_install
+  changed_when: "'was successfully' in __agent_dotnet_ef_install.stdout"
+  when:
+    - agent_install_dotnet | bool
+    - __agent_dotnet_ef_check.rc != 0 or agent_dotnet_ef_version not in (__agent_dotnet_ef_check.stdout | default(''))
+  tags: [dotnet, dotnet-ef]
+
+- name: Link dotnet-ef into /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ agent_dotnet_tools_dir }}/dotnet-ef"
+    dest: /usr/local/bin/dotnet-ef
+    state: link
+  when: agent_install_dotnet | bool
+  tags: [dotnet, dotnet-ef]
+
+# ── Docker service (packages.txt 113-115) ────────────────────────────────────
+- name: Enable and start Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  when:
+    - install_docker | bool
+    - agent_manage_services | bool
+  tags: [docker, service]

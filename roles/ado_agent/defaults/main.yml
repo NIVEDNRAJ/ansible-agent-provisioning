@@ -1,0 +1,115 @@
+---
+# =============================================================================
+# roles/ado_agent — defaults
+# =============================================================================
+# Same variable names the original group_vars/all.yml used, so existing -e
+# arguments and inventories keep working. Defaults live here, not in group_vars,
+# because Core Infra's group_vars/all.yml is empty and a role copied across has
+# to carry its own.
+# =============================================================================
+
+# ── server ───────────────────────────────────────────────────────────────────
+# Azure DevOps Server / TFS URL, e.g. https://ntp-tfs.nestdigital.com:8082/ or
+# https://dev.azure.com/contoso. No safe default for these: preflight refuses to run
+# without them.
+ado_org_url: ""
+ado_agent_pool: ""
+ado_agent_name: ""
+
+# ⚑ THE PAT. Read from the Ansible Vault variable `vault_ado_pat` when it is defined
+#   (the `vault_` prefix Core Infra's inventory already uses), otherwise from the
+#   ADO_PAT environment variable of the controller. It is never written to a file in
+#   this repository, never passed on a command line, and every task that handles it
+#   has no_log.
+ado_pat: "{{ vault_ado_pat if vault_ado_pat is defined else lookup('ansible.builtin.env', 'ADO_PAT') }}"
+
+# ── agent package ────────────────────────────────────────────────────────────
+# ⚑ THE AGENT MAJOR VERSION MUST SUIT THE SERVER. Azure DevOps Services runs the 4.x
+#   agent (.NET 8); Microsoft's guidance for Azure DevOps Server 2022 and 2020 is the
+#   3.x agent (the Microsoft Learn Linux-agent page); releases older than those may
+#   need older again. 4.261.0 is NOT known to work with your server. Preflight asks the
+#   server which agent it ships and STOPS when the major version differs
+#   (ado_agent_enforce_server_version). Confirm it once against the server's own
+#   "Download agent" page.
+ado_agent_version: "4.261.0"
+ado_agent_arch: "x64"
+
+# ⚑ vstsagentpackage.azureedge.net, which the original playbook used, no longer
+#   resolves — the Azure CDN it ran on was retired. download.agent.dev.azure.com
+#   serves the same archives (checked for the pinned version).
+ado_agent_download_url: "https://download.agent.dev.azure.com/agent/{{ ado_agent_version }}/vsts-agent-linux-{{ ado_agent_arch }}-{{ ado_agent_version }}.tar.gz"
+
+# For hosts with no route to the download URL: a vsts-agent-linux-*.tar.gz on the
+# CONTROLLER, copied to the host instead of downloaded. Empty downloads.
+ado_agent_package_src: ""
+
+# Optional archive checksum: a bare SHA-256 hex digest, or algorithm:digest.
+# ado_agent_sha256: ""
+
+# The archive is downloaded once per host into this root-owned directory and shared by
+# every agent on it. It is removed when the run ends unless this is true.
+ado_agent_cache_dir: /var/cache/ado-agent
+ado_agent_keep_archive: false
+
+# ── where the agents go ──────────────────────────────────────────────────────
+# ⚑ /var/agents/agent<N>, which is the layout the manual procedure uses and the one
+#   Core Infra's disk-guard build-server profile cleans (AGENT_ROOTS=/var/agents/*).
+#   Every number in ado_agent_numbers is one agent: its own directory, its own work
+#   folder, its own systemd unit.
+ado_agents_dir: /var/agents
+ado_agent_numbers: [1]
+
+# Names. With one agent the name is ado_agent_name unchanged. With several, agent N is
+# "<ado_agent_name>-<N>" — so that adding a second agent does not rename the first,
+# pin the first agent's name here:   ado_agent_names: {1: transacthub-agent-04}
+ado_agent_names: {}
+
+# ⚑ LEGACY: setting ado_agent_root provisions ONE agent in exactly that directory, as
+#   before, and ignores ado_agents_dir and ado_agent_numbers. The old default,
+#   /opt/azure-pipelines-agent, is no longer the default — preflight refuses to start
+#   a second agent next to one found there. Empty means "use the layout above".
+ado_agent_root: ""
+
+ado_agent_work_dir: "_work"
+ado_agent_user: "azagent"
+ado_agent_group: "azagent"
+
+# Extra config.sh arguments, e.g. ["--proxyurl", "http://proxy:3128"]. NEVER the token:
+# argument lists are visible to every user on the host.
+ado_agent_extra_config_args: []
+
+# ── checks ───────────────────────────────────────────────────────────────────
+# Before touching the host, ask the server — from the host, since that is where the
+# agent will connect from — whether it is reachable, accepts the PAT, has the pool,
+# and which agent version it ships. REST API version used for those calls.
+ado_agent_server_check: true
+ado_agent_api_version: "5.0"
+# true: a known difference between the pinned agent's major version and the one the server
+# ships stops the run. false: it is reported and the run goes on. A server that does not
+# say which agent it ships is never a stop.
+ado_agent_enforce_server_version: true
+
+# After the service starts, wait up to retries x delay seconds for it to be active.
+ado_agent_service_retries: 12
+ado_agent_service_delay: 5
+
+# Executables that must exist after provisioning. The tools the agent_packages
+# role installs are verified by that role; this list is for anything extra.
+required_commands:
+  - git
+  - curl
+  - jq
+  - python3
+  - tar
+
+# Checks for service-based dependencies (e.g. docker). Empty by default.
+required_services: []
+
+# install_docker is defined by the agent_packages role; when true the agent user is
+# added to the docker group here. It is read with default(false), so this role also
+# runs on its own.
+
+# packages.txt 44-45 / 69-70: path on the CONTROLLER of a NuGet.Config to install
+# for the agent user. It holds a PAT — keep it outside the repository or in
+# Ansible Vault. Empty skips the step.
+agent_nuget_config_src: ""

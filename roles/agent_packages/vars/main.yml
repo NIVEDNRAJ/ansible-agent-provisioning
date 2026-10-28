@@ -1,0 +1,198 @@
+---
+# =============================================================================
+# roles/agent_packages — internal variables
+# =============================================================================
+# Not intended to be overridden from inventory. The per-family keys follow the
+# `Debian` / `RedHat` split of ansible_os_family, which is how the rest of Core
+# Infra dispatches (roles/mssql, roles/jumpservers, roles/postgresql).
+# =============================================================================
+
+# ── supported platforms ──────────────────────────────────────────────────────
+# ⚑ NARROWER THAN CORE INFRA ON PURPOSE. Core Infra's roles accept the whole
+#   RedHat family, which silently includes Rocky, Alma and Oracle Linux. This
+#   role is asked for four distributions, so it names four and refuses the rest
+#   in preflight.yml — a derivative that reports ansible_os_family RedHat gets a
+#   clear refusal instead of a repository nobody tested.
+#
+#   Ubuntu is keyed by full version (the release is the version); the others by
+#   major version. Each entry was checked against the real repositories — see
+#   tests/ and the README for what was and was not verified.
+#
+#   Left out deliberately:
+#     Debian 13    openjdk-17-jdk is not in trixie (it ships 21), so packages.txt
+#                  line 101 cannot be met as written.
+#     Debian 11    end of life: deb.debian.org/debian-security now answers 404 for
+#                  its packages (openssl, python3.9, ca-certificates were tried).
+#     Ubuntu 26.04 and newer than the table: not checked. Add the version here
+#                  and run tests/run-matrix.sh before trusting it.
+#     CentOS 7/8   end of life; the mirrors moved to the vault.
+agent_supported_platforms:
+  Ubuntu: ["20.04", "22.04", "24.04"]
+  Debian: ["12"]
+  CentOS: ["9", "10"]          # CentOS Stream
+  RedHat: ["8", "9", "10"]
+
+__agent_platform_version: >-
+  {{ ansible_distribution_version if ansible_distribution == 'Ubuntu'
+     else ansible_distribution_major_version }}
+
+# ── repositories ─────────────────────────────────────────────────────────────
+# Microsoft. Debian/Ubuntu: the same keyring path, sources file name and line as
+# roles/mssql/tasks/tools-debian.yml, so running both on one host registers the
+# repository once. RedHat/CentOS: /rhel/<major>/prod.repo, which is what Core
+# Infra uses for CentOS as well.
+__agent_ms_keyring: /etc/apt/keyrings/microsoft.asc
+__agent_ms_deb_path: >-
+  {{ 'ubuntu/' ~ ansible_distribution_version if ansible_distribution == 'Ubuntu'
+     else 'debian/' ~ ansible_distribution_major_version }}
+
+# ⚑ WHERE .NET 8 COMES FROM DIFFERS BY RELEASE.
+#   Ubuntu 22.04+      Ubuntu's own feed. Microsoft's 22.04 feed ALSO lists
+#                      dotnet-sdk-8.0 (24.04's lists none), and that feed is enabled
+#                      anyway for sqlcmd, so it is pinned below Ubuntu's — otherwise
+#                      apt can resolve a mix of the two and fail.
+#   Ubuntu 20.04,
+#   Debian 12          Microsoft's feed; the distro has no dotnet-sdk-8.0.
+#   RHEL/CentOS        AppStream. Microsoft's feed is only used for sqlcmd, with
+#                      .NET excluded (see repos-redhat.yml).
+__agent_dotnet_from_ubuntu_feed: >-
+  {{ ansible_distribution == 'Ubuntu' and ansible_distribution_version is version('22.04', '>=') }}
+__agent_dotnet_needs_ms_feed: >-
+  {{ ansible_os_family == 'Debian' and not __agent_dotnet_from_ubuntu_feed | bool }}
+
+__agent_need_ms_repo: >-
+  {{ agent_install_sqlcmd | bool or
+     (agent_install_dotnet | bool and __agent_dotnet_needs_ms_feed | bool) }}
+
+# Docker's repository names the distribution in the path.
+__agent_docker_keyring: /etc/apt/keyrings/docker.asc
+__agent_docker_deb_distro: "{{ ansible_distribution | lower }}"
+__agent_docker_rpm_distro: "{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}"
+
+__agent_nodesource_keyring: /etc/apt/keyrings/nodesource.asc
+
+# ── Java ─────────────────────────────────────────────────────────────────────
+agent_java_major_debian: 17
+agent_java_major_redhat: "{{ 21 if ansible_distribution_major_version | int >= 10 else 17 }}"
+agent_java_deviates: "{{ ansible_os_family == 'RedHat' and agent_java_major_redhat | int != 17 }}"
+
+# ── agent runtime dependencies ───────────────────────────────────────────────
+# What Agent.Listener needs to start. The agent's own bin/installdependencies.sh
+# is NOT used: it probes libicu74/70/67/66... and has no libicu72, so it fails
+# on Debian 12. Names are per release because the Debian family versions them.
+__agent_libicu_debian:
+  Ubuntu-20.04: libicu66
+  Ubuntu-22.04: libicu70
+  Ubuntu-24.04: libicu74
+  Debian-12: libicu72
+
+# ── package catalog ──────────────────────────────────────────────────────────
+# One entry per tool. `ref` is the packages.txt line range it comes from —
+# tests/fixtures/packages-txt-manifest.yml checks every item of that file is
+# covered here. `commands` are verified with `command -v` after install.
+# Package lists are the DISTRIBUTION packages only; downloaded binaries
+# (kubectl, helm, yq, azcopy) and dotnet-ef are handled in tasks/binaries.yml.
+__agent_catalog:
+  base:
+    ref: "packages.txt:79-104 (curl, python3, git) + packages the original playbook installed"
+    commands: [curl, git, jq, python3, tar, openssl]
+    Debian: [ca-certificates, curl, git, jq, tar, gzip, unzip, openssl, acl, python3, python3-venv, python3-pip]
+    # ⚑ /usr/bin/curl, NOT `curl`. EL9 container and minimal images ship curl-minimal,
+    #   which conflicts with the curl package, so `dnf install curl` fails on them
+    #   (seen on CentOS Stream 9 and the RHEL 9 stand-in). The path is satisfied by
+    #   either package and installs one only if neither is present.
+    RedHat: [ca-certificates, /usr/bin/curl, git, jq, tar, gzip, unzip, openssl, acl, python3, python3-pip]
+  agent_runtime:
+    ref: "not in packages.txt — needed by the Azure Pipelines agent itself"
+    commands: []
+    # .get(): Ansible templates the whole catalog when it is read, including this
+    # Debian branch on a RedHat host, where the key does not exist.
+    Debian:
+      - "{{ __agent_libicu_debian.get(ansible_distribution ~ '-' ~ __agent_platform_version, 'libicu') }}"
+      - libkrb5-3
+      - zlib1g
+    RedHat: [libicu, krb5-libs, zlib, openssl-libs]
+  sqlcmd:
+    ref: "packages.txt:1-6 (mssql-tools, unixodbc-dev)"
+    commands: [sqlcmd, bcp]
+    Debian: ["{{ agent_mssql_tools_package }}", unixodbc-dev]
+    RedHat: ["{{ agent_mssql_tools_package }}", unixODBC-devel]
+  dotnet:
+    ref: "packages.txt:21-42 (dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0)"
+    commands: [dotnet]
+    Debian: ["dotnet-sdk-{{ agent_dotnet_channel }}", "aspnetcore-runtime-{{ agent_dotnet_channel }}", "dotnet-runtime-{{ agent_dotnet_channel }}"]
+    RedHat: ["dotnet-sdk-{{ agent_dotnet_channel }}", "aspnetcore-runtime-{{ agent_dotnet_channel }}", "dotnet-runtime-{{ agent_dotnet_channel }}"]
+  nodejs:
+    ref: "packages.txt:85-87, 94-95 (nodejs, npm)"
+    # npm is bundled in the NodeSource nodejs package. Installing the distro `npm`
+    # next to it pulls the distro nodejs and conflicts, so it is deliberately absent.
+    commands: [node, npm]
+    Debian: [nodejs]
+    RedHat: [nodejs]
+  maven:
+    ref: "packages.txt:89-92"
+    commands: [mvn]
+    Debian: [maven]
+    RedHat: [maven]
+  java:
+    ref: "packages.txt:100-101 (openjdk-17-jdk)"
+    commands: [java, javac]
+    # ⚑ RHEL/CentOS 10 do not ship JDK 17 (checked against the 10.x repositories),
+    #   so packages.txt line 101 cannot be met there; 21 is the closest and is what
+    #   Core Infra's roles/jumpservers already installs on 10. Reported by the run.
+    Debian: ["openjdk-{{ agent_java_major_debian }}-jdk"]
+    RedHat: ["java-{{ agent_java_major_redhat }}-openjdk-devel"]
+  docker:
+    ref: "packages.txt:113-118 (get.docker.com)"
+    commands: [docker]
+    Debian: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    RedHat: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+  kubectl:
+    ref: "packages.txt:10-13 — binary download"
+    commands: [kubectl]
+    Debian: []
+    RedHat: []
+  helm:
+    ref: "packages.txt:15-19 — binary download"
+    commands: [helm]
+    Debian: []
+    RedHat: []
+  yq:
+    ref: "packages.txt:82-84 — binary download"
+    commands: [yq]
+    Debian: []
+    RedHat: []
+  azcopy:
+    ref: "packages.txt:120-133 — binary download"
+    commands: [azcopy]
+    Debian: []
+    RedHat: []
+
+__agent_enabled_tools: >-
+  {{ ['base', 'agent_runtime']
+     + (['sqlcmd'] if agent_install_sqlcmd | bool else [])
+     + (['dotnet'] if agent_install_dotnet | bool else [])
+     + (['nodejs'] if agent_install_nodejs | bool else [])
+     + (['maven'] if agent_install_maven | bool else [])
+     + (['java'] if agent_install_java | bool else [])
+     + (['docker'] if install_docker | bool else [])
+     + (['kubectl'] if agent_install_kubectl | bool else [])
+     + (['helm'] if agent_install_helm | bool else [])
+     + (['yq'] if agent_install_yq | bool else [])
+     + (['azcopy'] if agent_install_azcopy | bool else []) }}
+
+# The distribution packages to install, by family, plus the caller's extras.
+# `|` binds tighter than `+`, so each sum is parenthesised before unique.
+agent_resolved_packages: >-
+  {{ ((__agent_enabled_tools | map('extract', __agent_catalog) | map(attribute=ansible_os_family) | flatten)
+      + (agent_extra_packages | default([]))
+      + (agent_extra_packages_debian if ansible_os_family == 'Debian' else agent_extra_packages_redhat))
+     | unique | list }}
+
+agent_resolved_commands: >-
+  {{ ((__agent_enabled_tools | map('extract', __agent_catalog) | map(attribute='commands') | flatten)
+      + (['dotnet-ef'] if agent_install_dotnet | bool else []))
+     | unique | list }}
+
+# mssql-tools installs to /opt/mssql-tools, mssql-tools18 to /opt/mssql-tools18.
+__agent_mssql_bin_dir: "/opt/{{ agent_mssql_tools_package }}/bin"

@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# Agent numbering, names and directories — mocked, nothing is touched
+# =============================================================================
+#   ansible-playbook tests/test_instances.yml
+# Runs the real roles/ado_agent/tasks/instances.yml once per case in
+# fixtures/instances.yml.
+
+- name: Agent numbering
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    role_dir: "{{ playbook_dir }}/../roles/ado_agent"
+    cases: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/fixtures/instances.yml') | from_yaml }}"
+
+  tasks:
+    - name: Load the role defaults
+      ansible.builtin.include_vars: "{{ role_dir }}/defaults/main.yml"
+
+    - name: Valid cases resolve to the expected agents
+      ansible.builtin.include_tasks: check_instances_valid.yml
+      loop: "{{ cases.valid }}"
+      loop_control:
+        loop_var: case
+        label: "{{ case.name }}"
+
+    - name: Invalid cases are refused
+      ansible.builtin.include_tasks: check_instances_invalid.yml
+      loop: "{{ cases.invalid }}"
+      loop_control:
+        loop_var: case
+        label: "{{ case.name }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: "{{ cases.valid | length }} valid and {{ cases.invalid | length }} invalid numbering cases behave as expected."

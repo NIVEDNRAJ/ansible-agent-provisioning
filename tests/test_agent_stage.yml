@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# Stage the Azure Pipelines agent without registering it
+# =============================================================================
+# Runs the ado_agent role up to the point it would contact Azure DevOps
+# (`--skip-tags register,service`), then starts the agent binary with --version.
+# That proves what only a real start can: that the agent's runtime dependencies —
+# libicu, krb5, openssl — are present on this distribution.
+#
+# Driven by tests/run-matrix.sh against throwaway containers. The org, pool and
+# token below are placeholders and are never sent anywhere (the server check is off).
+
+- name: Stage the agent and start its binary
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    ado_org_url: https://dev.azure.com/example-not-contacted
+    ado_agent_pool: not-contacted
+    ado_agent_name: test-agent
+    ado_pat: placeholder-not-a-token
+    ado_agent_server_check: false
+  roles:
+    - role: ado_agent
+
+  post_tasks:
+    - name: The agent archive was extracted and owned by the agent user
+      ansible.builtin.stat:
+        path: "{{ __ado_instances[0].root }}/config.sh"
+      register: staged_config
+      failed_when: not staged_config.stat.exists or staged_config.stat.pw_name != ado_agent_user
+
+    - name: Start the agent binary as the agent user
+      ansible.builtin.command: "{{ __ado_instances[0].root }}/bin/Agent.Listener --version"
+      become: true
+      become_user: "{{ ado_agent_user }}"
+      register: agent_version
+      changed_when: false
+
+    - name: Show the agent version
+      ansible.builtin.debug:
+        msg: "Agent.Listener {{ agent_version.stdout }} on {{ ansible_distribution }} {{ ansible_distribution_version }}"

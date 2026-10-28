@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# Azure DevOps self-hosted agent — Ubuntu, Debian, RHEL and CentOS Stream
+# =============================================================================
+#   ansible-playbook playbooks/setup-agent.yml -e agent_vm_ip=10.10.1.25 ...
+#
+#   # validate the target and the variables without changing anything
+#   ansible-playbook playbooks/setup-agent.yml --tags preflight
+#
+#   # tooling only (no agent registration), or the agent only
+#   ansible-playbook playbooks/setup-agent.yml --tags packages
+#   ansible-playbook playbooks/setup-agent.yml --tags agent
+#
+# ⚑ gather_facts MUST STAY ON. Both roles dispatch on ansible_distribution and
+#   ansible_os_family, which are gathered facts.
+#
+# `agent_hosts` lets the same playbook run against another inventory group, e.g.
+# `agentservers` in Core Infra's inventory.yml; see integration/core-infra/.
+# =============================================================================
+
+- name: Provision an Azure DevOps self-hosted agent
+  hosts: "{{ agent_hosts | default('agent_targets') }}"
+  become: true
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: agent_packages
+      tags: [packages]
+    - role: ado_agent
+      tags: [agent]

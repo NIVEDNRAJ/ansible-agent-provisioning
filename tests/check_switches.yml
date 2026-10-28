@@ -1,0 +1,87 @@
+---
+# Switches and backward compatibility, on one Debian-family and one RedHat host.
+
+- name: Mock Ubuntu 22.04
+  ansible.builtin.set_fact:
+    ansible_distribution: Ubuntu
+    ansible_distribution_version: "22.04"
+    ansible_distribution_major_version: "22"
+    ansible_distribution_release: jammy
+    ansible_os_family: Debian
+    ansible_architecture: x86_64
+
+- name: Docker is opt-in, as the original playbook had it
+  ansible.builtin.assert:
+    that:
+      - install_docker | bool == false
+      - "'docker-ce' not in agent_resolved_packages"
+      - "'docker' not in agent_resolved_commands"
+    quiet: true
+
+- name: Disabling a tool removes its packages and checks
+  ansible.builtin.set_fact:
+    agent_install_java: false
+    agent_install_maven: false
+    agent_install_dotnet: false
+
+- name: Check the removal
+  ansible.builtin.assert:
+    that:
+      - "'openjdk-17-jdk' not in agent_resolved_packages"
+      - "'maven' not in agent_resolved_packages"
+      - "'dotnet-sdk-8.0' not in agent_resolved_packages"
+      - "'dotnet-ef' not in agent_resolved_commands"
+      - "'mvn' not in agent_resolved_commands"
+      # the Microsoft repo is still needed for sqlcmd
+      - __agent_need_ms_repo | bool
+    quiet: true
+
+- name: With sqlcmd also off, nothing needs the Microsoft repository
+  ansible.builtin.set_fact:
+    agent_install_sqlcmd: false
+
+- name: Check the Microsoft repository is not registered for nothing
+  ansible.builtin.assert:
+    that:
+      - not (__agent_need_ms_repo | bool)
+      - "'mssql-tools' not in agent_resolved_packages"
+    quiet: true
+
+# The original playbook took its package list from `apt_packages`. Still honoured.
+- name: Legacy apt_packages are honoured on Debian-family hosts only
+  ansible.builtin.set_fact:
+    apt_packages: [docker.io, ncdu]
+
+- name: Check the legacy variable
+  ansible.builtin.assert:
+    that:
+      - "'ncdu' in agent_resolved_packages"
+      - "'docker.io' in agent_resolved_packages"
+    quiet: true
+
+- name: Same variable on a RedHat host
+  ansible.builtin.set_fact:
+    ansible_distribution: RedHat
+    ansible_distribution_version: "9.6"
+    ansible_distribution_major_version: "9"
+    ansible_distribution_release: Plow
+    ansible_os_family: RedHat
+
+- name: Check the legacy variable is not applied
+  ansible.builtin.assert:
+    that:
+      - "'ncdu' not in agent_resolved_packages"
+      - "'docker.io' not in agent_resolved_packages"
+    quiet: true
+
+- name: Per-family extras
+  ansible.builtin.set_fact:
+    agent_extra_packages_redhat: [ncdu-extra]
+    agent_extra_packages: [tree]
+
+- name: Check the extras
+  ansible.builtin.assert:
+    that:
+      - "'ncdu-extra' in agent_resolved_packages"
+      - "'tree' in agent_resolved_packages"
+    quiet: true

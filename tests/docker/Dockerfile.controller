@@ -1,0 +1,21 @@
+# Ansible controller used by tests/run-matrix.sh. Versions match Core Infra's
+# ansible/requirements.txt (ansible==9.8.0 -> ansible-core 2.16), so a pass here is a
+# pass on the controller the company actually uses.
+#
+#   docker build -f tests/docker/Dockerfile.controller -t agent-prov-ctl tests/docker
+#
+# Behind a TLS-inspecting proxy, add your CA at build time:
+#   docker build --build-arg EXTRA_CA=corp-ca.pem ...   (file must sit in tests/docker/)
+FROM docker:cli AS dockercli
+
+FROM python:3.12-slim
+ARG EXTRA_CA=""
+COPY ${EXTRA_CA:-Dockerfile.controller} /tmp/extra-ca-src
+RUN if [ -n "${EXTRA_CA}" ]; then cat /tmp/extra-ca-src >> /etc/ssl/certs/ca-certificates.crt; fi; rm -f /tmp/extra-ca-src
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+RUN pip install --no-cache-dir ansible==9.8.0 ansible-lint==24.9.2 yamllint==1.35.1 jmespath==1.0.1 \
+ && ansible-galaxy collection install community.docker ansible.posix --force >/dev/null
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+WORKDIR /work

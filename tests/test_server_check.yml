@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# The server preflight, against a mock — no real server is contacted
+# =============================================================================
+#   python3 tests/mock_tfs.py 8099 &
+#   ansible-playbook tests/test_server_check.yml
+# tests/run-mocked.sh does both, and also checks that no PAT appears in the output.
+#
+# This drives the role's branches with answers shaped like the documented ones. It does
+# NOT show that a real Azure DevOps Server answers the same way — see the README.
+
+- name: Server preflight
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    role_dir: "{{ playbook_dir }}/../roles/ado_agent"
+    spec: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/fixtures/server-cases.yml') | from_yaml }}"
+
+  tasks:
+    - name: Load the role defaults
+      ansible.builtin.include_vars: "{{ role_dir }}/defaults/main.yml"
+
+    - name: Run each case
+      ansible.builtin.include_tasks: check_server_case.yml
+      loop: "{{ spec.cases }}"
+      loop_control:
+        loop_var: case
+        label: "{{ case.name }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: "{{ spec.cases | length }} server-check cases behave as expected."

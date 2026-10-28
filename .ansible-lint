@@ -1,0 +1,12 @@
+---
+exclude_paths:
+  - tests/docker/
+  - integration/
+
+skip_list:
+  # The two roles share an `agent_` / `ado_agent_` component prefix, as Core Infra's
+  # roles do (mssql_, amq_, registry_, sftp_), instead of the role name. Several
+  # public variables also keep names that existing runs and inventories already use
+  # (install_docker, ado_org_url, required_commands) or that Core Infra shares
+  # between roles (kubectl_version, helm_version, yq_version).
+  - var-naming[no-role-prefix]

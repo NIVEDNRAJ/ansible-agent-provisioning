@@ -1,0 +1,63 @@
+---
+# Cases for tests/test_server_check.yml, answered by tests/mock_tfs.py. The PATs are
+# the mock's fixed fake values, not credentials for anything.
+#
+# Enforcement is ON unless a case says `enforce: false`, as it is in the role.
+#   pass       the preflight must succeed (and server_agent must be what it read)
+#   error      a regex the failure message must match; the PAT must not be in it
+
+cases:
+  - name: accepted, server ships the same agent major version
+    url: http://127.0.0.1:8099/v4/
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: true, server_agent: "4.258.1", same_major: true}
+
+  - name: a different major stops the run by default
+    url: http://127.0.0.1:8099/v3
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: false, error: 'does not match what the server ships \(.3\.246\.0.\).*Set ado_agent_version to a 3\.x'}
+
+  - name: a different major is only reported when enforcement is off
+    url: http://127.0.0.1:8099/v3
+    pat: good-pat-SECRET-1
+    pool: Default
+    enforce: false
+    expect: {pass: true, server_agent: "3.246.0", same_major: false}
+
+  - name: a server that does not say which agent it ships is reported unverified, not refused
+    url: http://127.0.0.1:8099/nopkg
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: true, server_agent: "", same_major: false}
+
+  - name: a wrong PAT is named as rejected
+    url: http://127.0.0.1:8099/v4
+    pat: wrong-pat-SECRET-3
+    pool: Default
+    expect: {pass: false, error: "HTTP 401.*PAT was rejected"}
+
+  - name: a PAT without the agent pool scope is named as such
+    url: http://127.0.0.1:8099/v4
+    pat: forbidden-pat-SECRET-2
+    pool: Default
+    expect: {pass: false, error: "HTTP 403.*Agent Pools"}
+
+  - name: a missing pool is named
+    url: http://127.0.0.1:8099/v4
+    pat: good-pat-SECRET-1
+    pool: NoSuchPool
+    expect: {pass: false, error: "no agent pool named 'NoSuchPool'"}
+
+  - name: a wrong collection path is named
+    url: http://127.0.0.1:8099/wrong
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: false, error: "HTTP 404.*no such endpoint"}
+
+  - name: an unreachable server is named
+    url: http://127.0.0.1:8098/v4
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: false, error: "could not be reached"}

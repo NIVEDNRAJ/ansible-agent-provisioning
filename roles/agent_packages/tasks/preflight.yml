@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# Preflight validation — read-only
+# =============================================================================
+
+- name: Verify the platform
+  ansible.builtin.import_tasks: preflight_platform.yml
+
+- name: Check required variables are set
+  ansible.builtin.assert:
+    that:
+      - kubectl_version | length > 0
+      - helm_version | length > 0
+      - yq_version | length > 0
+      - agent_dotnet_ef_version | length > 0
+      - agent_nodejs_major | string is match('^[0-9]+$')
+      - agent_mssql_tools_package in ['mssql-tools', 'mssql-tools18']
+    fail_msg: >-
+      A version variable is empty, agent_nodejs_major is not a number, or
+      agent_mssql_tools_package is not mssql-tools / mssql-tools18.
+    success_msg: "Version variables are set"
+  tags: [preflight, validate]

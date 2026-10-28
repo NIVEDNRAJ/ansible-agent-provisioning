@@ -1,0 +1,33 @@
+---
+- name: Run the case
+  block:
+    - name: Run the real server preflight
+      ansible.builtin.include_tasks: "{{ role_dir }}/tasks/server_check.yml"
+      vars:
+        ado_org_url: "{{ case.url }}"
+        ado_pat: "{{ case.pat }}"
+        ado_agent_pool: "{{ case.pool }}"
+        ado_agent_enforce_server_version: "{{ case.enforce | default(true) }}"
+
+    - name: It was expected to succeed, and read what the server ships
+      ansible.builtin.assert:
+        that:
+          - case.expect.pass
+          - __ado_server_agent == case.expect.server_agent
+          - (__ado_server_major == __ado_pinned_major) == case.expect.same_major
+        fail_msg: >-
+          {{ case.name }}: expected {{ case.expect }}; read server agent '{{ __ado_server_agent }}'
+          (major '{{ __ado_server_major }}' against pinned '{{ __ado_pinned_major }}')
+        quiet: true
+
+  rescue:
+    - name: It was expected to fail, with a message that names the cause and hides the PAT
+      ansible.builtin.assert:
+        that:
+          - not case.expect.pass
+          - ansible_failed_result.msg is match('(?s).*' ~ case.expect.error ~ '.*')
+          - case.pat not in ansible_failed_result.msg
+        fail_msg: >-
+          {{ case.name }}: the failure did not match /{{ case.expect.error | default('(no failure expected)') }}/:
+          {{ ansible_failed_result.msg | default('') | replace(case.pat, '********') }}
+        quiet: true

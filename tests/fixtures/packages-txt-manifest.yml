@@ -1,0 +1,199 @@
+---
+# Every item in packages.txt (the file next to the two repositories) and what became
+# of it. tests/test_resolution.yml fails if an item marked `installed` or `deviation`
+# is not in agent_resolved_packages / agent_resolved_commands for the family it names.
+#
+# disposition:
+#   installed     a package or command the roles install and verify
+#   deviation     installed, but not as written — `note` says why
+#   superseded    packages.txt does it twice; the other route is the one used
+#   not-ported    deliberately not done here — `note` says what covers it
+#
+# `lines` are 1-based line numbers of packages.txt.
+
+items:
+  - id: curl
+    lines: "81-82"
+    disposition: installed
+    debian: [curl]
+    redhat: [/usr/bin/curl]
+    commands: [curl]
+    note: >-
+      RedHat asks for the path so that curl-minimal, which EL9 minimal and container
+      images ship and which conflicts with curl, satisfies it
+
+  - id: mssql-tools
+    lines: "6"
+    disposition: installed
+    debian: [mssql-tools]
+    redhat: [mssql-tools]
+    commands: [sqlcmd, bcp]
+
+  - id: unixodbc-dev
+    lines: "6"
+    disposition: installed
+    debian: [unixodbc-dev]
+    redhat: [unixODBC-devel]
+    note: RedHat name; lives in CodeReady Builder/CRB on 9 and 10
+
+  - id: kubectl
+    lines: "10-13"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [kubectl]
+    note: binary download, pinned (kubectl_version)
+
+  - id: helm
+    lines: "15-19"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [helm]
+    note: release tarball plus checksum instead of get-helm-3 piped to a shell
+
+  - id: dotnet-sdk-8.0
+    lines: "21-27, 37-40"
+    disposition: installed
+    debian: [dotnet-sdk-8.0]
+    redhat: [dotnet-sdk-8.0]
+    commands: [dotnet]
+
+  - id: aspnetcore-runtime-8.0
+    lines: "41"
+    disposition: installed
+    debian: [aspnetcore-runtime-8.0]
+    redhat: [aspnetcore-runtime-8.0]
+
+  - id: dotnet-runtime-8.0
+    lines: "42"
+    disposition: installed
+    debian: [dotnet-runtime-8.0]
+    redhat: [dotnet-runtime-8.0]
+
+  - id: dotnet-ef
+    lines: "29-35, 111"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [dotnet-ef]
+    note: 8.0.11, installed with --tool-path /opt/dotnet-tools instead of --global
+
+  - id: dotnet-install.sh
+    lines: "106-109"
+    disposition: superseded
+    debian: []
+    redhat: []
+    note: >-
+      the dotnet-sdk-8.0 package (lines 26, 39) is the route used; the script
+      installs an unpinned latest-LTS SDK under /root
+
+  - id: yq
+    lines: "83-84"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [yq]
+    note: mikefarah binary, pinned (yq_version); not the distro yq package
+
+  - id: nodejs
+    lines: "85-87"
+    disposition: deviation
+    debian: [nodejs]
+    redhat: [nodejs]
+    commands: [node]
+    note: Node 10 (setup_10.x) is EOL and unpublished; agent_nodejs_major defaults to 22
+
+  - id: maven
+    lines: "89-92"
+    disposition: installed
+    debian: [maven]
+    redhat: [maven]
+    commands: [mvn]
+    note: plus the /opt/maven/bin/mvn link
+
+  - id: npm
+    lines: "94-95"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [npm]
+    note: bundled in the NodeSource nodejs package; the distro npm conflicts with it
+
+  - id: python3
+    lines: "97-98"
+    disposition: installed
+    debian: [python3]
+    redhat: [python3]
+    commands: [python3]
+
+  - id: openjdk-17-jdk
+    lines: "100-101"
+    disposition: deviation
+    debian: [openjdk-17-jdk]
+    redhat: [java-17-openjdk-devel]
+    commands: [java, javac]
+    note: RHEL and CentOS 10 ship no JDK 17; java-21-openjdk-devel is installed there
+
+  - id: git
+    lines: "103-104"
+    disposition: installed
+    debian: [git]
+    redhat: [git]
+    commands: [git]
+
+  - id: docker
+    lines: "113-115"
+    disposition: installed
+    docker: true
+    debian: [docker-ce, docker-ce-cli, containerd.io]
+    redhat: [docker-ce, docker-ce-cli, containerd.io]
+    commands: [docker]
+    note: official repository instead of get.docker.com; opt-in through install_docker
+
+  - id: docker-group
+    lines: "117-118"
+    disposition: installed
+    debian: []
+    redhat: []
+    note: ado_agent adds the agent user to the docker group when install_docker is true
+
+  - id: azcopy
+    lines: "120-133"
+    disposition: installed
+    debian: []
+    redhat: []
+    commands: [azcopy]
+    note: aka.ms "latest" alias, so installed when absent and never upgraded
+
+  - id: dotnet-env
+    lines: "135-138"
+    disposition: superseded
+    debian: []
+    redhat: []
+    note: commented out in packages.txt; the packaged dotnet is already on PATH
+
+  - id: nuget-config
+    lines: "44-45, 69-72"
+    disposition: installed
+    debian: []
+    redhat: []
+    note: >-
+      ado_agent copies agent_nuget_config_src when it is set; the file itself is
+      in neither repository
+
+  - id: cron-cleanup
+    lines: "47-67"
+    disposition: not-ported
+    debian: []
+    redhat: []
+    note: >-
+      covered by Core Infra's disk-guard build-server profile (docker prune,
+      _work cleanup, journald); install it with disk-guard/install.sh
+
+  - id: apt-upgrade
+    lines: "143-144"
+    disposition: not-ported
+    debian: []
+    redhat: []
+    note: commented out in packages.txt; roles/mssql removed the same behaviour as a hazard

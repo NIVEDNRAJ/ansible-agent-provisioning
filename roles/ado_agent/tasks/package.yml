@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# Obtain the agent archive once per host, for every agent that needs it
+# =============================================================================
+# Skipped entirely when every agent is already configured, so a re-run downloads
+# nothing.
+
+- name: Check which agents are already configured
+  ansible.builtin.stat:
+    path: "{{ item.root }}/.agent"
+  loop: "{{ __ado_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: __ado_configured
+  tags: [agent]
+
+- name: Work out whether the archive is needed
+  ansible.builtin.set_fact:
+    __ado_need_package: "{{ __ado_configured.results | rejectattr('stat.exists') | list | length > 0 }}"
+  tags: [agent]
+
+- name: Obtain the agent archive
+  when: __ado_need_package | bool
+  tags: [agent]
+  block:
+    - name: Create the package cache directory
+      ansible.builtin.file:
+        path: "{{ ado_agent_cache_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # ⚑ A CACHED ARCHIVE IS USED AS IT IS. get_url does not skip an existing file: it still
+    #   asks the download server whether it changed, so a cached archive would need the
+    #   network anyway — and a firewall that refuses the download (some answer 403 to
+    #   *.tar.gz) would fail a run that already has what it needs. With ado_agent_sha256 set
+    #   the cached file must also match it, or it is fetched again.
+    - name: Look for an archive already in the cache
+      ansible.builtin.stat:
+        path: "{{ __ado_archive }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+      register: __ado_cached
+
+    # ⚑ get_url wants `algorithm:digest`; the original passed the bare digest the
+    #   README tells you to supply, which it rejects. A bare digest is now prefixed.
+    - name: Download the pinned agent archive
+      ansible.builtin.get_url:
+        url: "{{ ado_agent_download_url }}"
+        dest: "{{ __ado_archive }}"
+        mode: "0644"
+        checksum: >-
+          {{ (ado_agent_sha256 if ':' in ado_agent_sha256 else 'sha256:' ~ ado_agent_sha256)
+             if ado_agent_sha256 | default('') | length > 0 else omit }}
+      when:
+        - ado_agent_package_src | length == 0
+        - >-
+          not __ado_cached.stat.exists or
+          (ado_agent_sha256 | default('') | length > 0 and
+           __ado_cached.stat.checksum != (ado_agent_sha256 | regex_replace('^sha256:', '')))
+
+    - name: Copy the agent archive from the controller
+      ansible.builtin.copy:
+        src: "{{ ado_agent_package_src }}"
+        dest: "{{ __ado_archive }}"
+        mode: "0644"
+      when: ado_agent_package_src | length > 0
+
+    - name: Verify the copied archive against ado_agent_sha256
+      ansible.builtin.stat:
+        path: "{{ __ado_archive }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+      register: __ado_archive_stat
+      when:
+        - ado_agent_package_src | length > 0
+        - ado_agent_sha256 | default('') | length > 0
+
+    - name: The copied archive must match
+      ansible.builtin.assert:
+        that:
+          - __ado_archive_stat.stat.checksum == (ado_agent_sha256 | regex_replace('^sha256:', ''))
+        fail_msg: "{{ ado_agent_package_src }} does not match ado_agent_sha256."
+      when: __ado_archive_stat is not skipped

@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Azure Pipelines / Azure DevOps Server self-hosted agents — one or several per host
+# =============================================================================
+# Flow:
+#   preflight.yml      platform (every tag)
+#   params.yml         variables, systemd, old-layout guard
+#   instances.yml      which agents: number, directory, name
+#   server_check.yml   server reachable? PAT accepted? pool there? agent version suits?
+#   user, NuGet.Config
+#   package.yml        fetch the archive once, if any agent needs it
+#   agent.yml          per agent: directory, extract, config.sh, service, verify
+#   required commands / services, summary
+#
+# Nothing here is distribution-specific: the agent ships its own runtime, and what
+# it needs from the OS is installed by roles/agent_packages.
+#
+#   --tags preflight   everything up to and including the server check; changes nothing
+#   --skip-tags register,service   stage the agent (user, directory, extract) without
+#                                  contacting the server; tests/ uses this
+# =============================================================================
+
+- name: Preflight validation
+  ansible.builtin.import_tasks: preflight.yml
+  tags: [always]
+
+- name: Check the parameters
+  ansible.builtin.import_tasks: params.yml
+  tags: [agent, preflight]
+
+- name: Work out the agents to provision
+  ansible.builtin.import_tasks: instances.yml
+  tags: [agent, preflight]
+
+- name: Check the server
+  ansible.builtin.import_tasks: server_check.yml
+  when: ado_agent_server_check | bool
+  tags: [agent, preflight, server]
+
+- name: Ensure configured service accounts exist
+  ansible.builtin.group:
+    name: "{{ ado_agent_group }}"
+    system: true
+    state: present
+  tags: [agent, user]
+
+- name: Ensure Azure agent service user exists
+  ansible.builtin.user:
+    name: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_group }}"
+    groups: "{{ ['docker'] if install_docker | default(false) | bool else omit }}"
+    append: "{{ install_docker | default(false) | bool }}"
+    system: true
+    create_home: true
+    shell: /bin/bash
+    state: present
+  tags: [agent, user]
+
+- name: Ensure Docker socket access for agent user when requested
+  ansible.builtin.user:
+    name: "{{ ado_agent_user }}"
+    groups: docker
+    append: true
+  when: install_docker | default(false) | bool
+  tags: [agent, user, docker]
+
+# packages.txt 44-45 / 69-70. The file holds a PAT, so it is written 0600 and its
+# content is kept out of the output.
+- name: Install NuGet.Config for the agent user
+  when: agent_nuget_config_src | length > 0
+  tags: [agent, nuget]
+  block:
+    - name: Create the agent user's NuGet directory
+      ansible.builtin.file:
+        path: "/home/{{ ado_agent_user }}/.nuget/NuGet"
+        state: directory
+        owner: "{{ ado_agent_user }}"
+        group: "{{ ado_agent_group }}"
+        mode: "0700"
+
+    - name: Copy NuGet.Config
+      ansible.builtin.copy:
+        src: "{{ agent_nuget_config_src }}"
+        dest: "/home/{{ ado_agent_user }}/.nuget/NuGet/NuGet.Config"
+        owner: "{{ ado_agent_user }}"
+        group: "{{ ado_agent_group }}"
+        mode: "0600"
+      no_log: true
+
+- name: Obtain the agent package
+  ansible.builtin.import_tasks: package.yml
+
+- name: Provision each agent
+  ansible.builtin.include_tasks: agent.yml
+  loop: "{{ __ado_instances }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.name }} ({{ agent.root }})"
+  tags: [agent]
+
+- name: Remove the agent archive
+  ansible.builtin.file:
+    path: "{{ __ado_archive }}"
+    state: absent
+  when: not ado_agent_keep_archive | bool
+  tags: [agent]
+
+- name: Verify required executable commands
+  ansible.builtin.command:
+    argv: ["bash", "-lc", "command -v {{ item | quote }}"]
+  loop: "{{ required_commands }}"
+  register: command_checks
+  changed_when: false
+  failed_when: command_checks.rc != 0
+  tags: [verify]
+
+- name: Verify required system services
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  loop: "{{ required_services }}"
+  register: required_service_checks
+  changed_when: false
+  failed_when: required_service_checks.rc != 0
+  tags: [verify]
+
+- name: Report provisioning summary
+  ansible.builtin.debug:
+    msg:
+      - "Host: {{ inventory_hostname }} ({{ ansible_host | default(inventory_hostname) }})"
+      - "Platform: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      - "Server: {{ ado_org_url }}  Pool: {{ ado_agent_pool }}"
+      - "Agents: {{ __ado_instances | map(attribute='name') | join(', ') }}"
+      - "Required commands verified: {{ required_commands | join(', ') }}"
+      - "Note: confirm each agent shows Online in the pool, and run a pipeline that uses the tools."
+  tags: [verify]

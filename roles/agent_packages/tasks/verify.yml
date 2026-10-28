@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Verify every tool this role installed — fails the run if one is missing
+# =============================================================================
+# `bash -lc` so /etc/profile.d (sqlcmd) is read, matching how the original
+# playbook checked commands.
+
+- name: Verify installed commands
+  ansible.builtin.command:
+    argv: ["bash", "-lc", "command -v {{ item | quote }}"]
+  loop: "{{ agent_resolved_commands }}"
+  register: __agent_command_checks
+  changed_when: false
+  failed_when: __agent_command_checks.rc != 0
+  tags: [verify]
+
+- name: Report the packages.txt tools
+  ansible.builtin.debug:
+    msg:
+      - "Platform: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      - "Packages requested: {{ agent_resolved_packages | join(', ') }}"
+      - "Commands verified: {{ agent_resolved_commands | join(', ') }}"
+      - "Skipped by configuration: {{ (['docker'] if not install_docker | bool else []) | join(', ') or 'none' }}"
+  tags: [verify]

@@ -1,0 +1,10 @@
+---
+# Sets the mocked facts for one fixture. Included by the check_*.yml files.
+- name: "Mock facts for {{ platform.name }}"
+  ansible.builtin.set_fact:
+    ansible_distribution: "{{ platform.facts.distribution }}"
+    ansible_distribution_version: "{{ platform.facts.version }}"
+    ansible_distribution_major_version: "{{ platform.facts.major }}"
+    ansible_distribution_release: "{{ platform.facts.release }}"
+    ansible_os_family: "{{ platform.facts.family }}"
+    ansible_architecture: "{{ platform.arch | default('x86_64') }}"

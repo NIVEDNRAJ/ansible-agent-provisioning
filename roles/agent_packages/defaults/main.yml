@@ -1,0 +1,79 @@
+---
+# =============================================================================
+# roles/agent_packages — defaults
+# =============================================================================
+# Overridable per host or group in inventory.yml, or with -e. Every tool below
+# traces to a line of packages.txt; vars/main.yml holds the per-distribution
+# package names and says which lines each entry covers.
+# =============================================================================
+
+# ── what to install ──────────────────────────────────────────────────────────
+agent_install_sqlcmd: true      # packages.txt 1-6     mssql-tools + unixodbc-dev
+agent_install_kubectl: true     # packages.txt 10-13
+agent_install_helm: true        # packages.txt 15-19
+agent_install_dotnet: true      # packages.txt 21-42, 106-111  SDK, runtimes, dotnet-ef
+agent_install_nodejs: true      # packages.txt 85-87, 94-95    nodejs + npm
+agent_install_maven: true       # packages.txt 89-92
+agent_install_java: true        # packages.txt 100-101
+agent_install_yq: true          # packages.txt 82-84
+agent_install_azcopy: true      # packages.txt 120-133
+
+# ⚑ Docker keeps the switch the original playbook already had, and keeps its
+#   default: Docker socket access is root-equivalent, so it stays opt-in.
+#   packages.txt 113-118 is covered when this is true.
+install_docker: false
+
+# ── versions ─────────────────────────────────────────────────────────────────
+# Same names and values as playbooks/jumpservers.yml in Core Infra, so one
+# inventory entry sets the version for both.
+kubectl_version: "v1.30.4"
+helm_version: "3.19.4"
+yq_version: "4.44.5"
+
+# .NET 8 and dotnet-ef 8.0.11 are what packages.txt 21-35 pin.
+agent_dotnet_channel: "8.0"
+agent_dotnet_ef_version: "8.0.11"
+
+# ⚑ packages.txt line 86 installs Node 10 (nodesource setup_10.x), which is end
+#   of life and not published for any release in the supported matrix. 22 is the
+#   default; set another LTS major here. It is the same major on every distro
+#   because the distro repos ship 10 to 20 depending on release.
+agent_nodejs_major: 22
+
+# ⚑ packages.txt line 6 installs mssql-tools (17.x), and that is the default so
+#   the pipeline scripts written against the existing agents keep working. Core
+#   Infra's mssql role installs mssql-tools18 instead. 18 encrypts by default, so
+#   sqlcmd needs -No (or -C) against a server with a self-signed certificate —
+#   set `mssql-tools18` only once the pipelines have been checked for that.
+agent_mssql_tools_package: mssql-tools
+
+# ⚑ Both NodeSource key URLs end in .key, which some firewalls block (see
+#   tasks/repos-debian.yml). Point these at an internal mirror if yours does.
+agent_nodesource_key_url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+agent_nodesource_rpm_key_url: "https://rpm.nodesource.com/gpgkey/ns-operations-public.key"
+
+# packages.txt 120 downloads the "latest" alias; there is no stable versioned URL.
+# Pin by pointing this at a versioned release URL and setting the checksum.
+agent_azcopy_url: "https://aka.ms/downloadazcopy-v10-linux"
+agent_azcopy_sha256: ""
+agent_yq_sha256: ""
+
+# ── extras ───────────────────────────────────────────────────────────────────
+# Same package name on every family, or per family where the names differ.
+# The original playbook's `apt_packages` is still honoured as Debian-family extras.
+agent_extra_packages: []
+agent_extra_packages_debian: "{{ apt_packages | default([]) }}"
+agent_extra_packages_redhat: []
+
+# ⚑ unixODBC-devel (packages.txt 6, unixodbc-dev) is in CodeReady Builder / CRB on
+#   RHEL-family 9 and 10, not in AppStream. Enabled for the install transaction
+#   only, not persistently. On RHEL the repo id differs by subscription vs RHUI,
+#   hence the glob; set this if neither matches your hosts.
+agent_crb_repo: "{{ 'crb' if ansible_distribution == 'CentOS' else '*codeready-builder*' }}"
+
+# ── behaviour ────────────────────────────────────────────────────────────────
+# false where there is no systemd (container test runs) — packages still install,
+# only the Docker enable/start is skipped.
+agent_manage_services: true
+
+agent_dotnet_tools_dir: /opt/dotnet-tools

@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Debian family — third-party repositories (Microsoft, Docker, NodeSource)
+# =============================================================================
+# ⚑ KEYRING FILES SCOPED BY signed-by=, NOT apt_key — same reasoning as
+#   roles/mssql/tasks/install-debian.yml: apt_key is removed in ansible-core 2.17
+#   and trusts a key for every repository on the host.
+
+- name: Install repository prerequisites (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: [ca-certificates, gnupg]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [packages, repo, debian]
+
+- name: Ensure the APT keyring directory exists (Debian/Ubuntu)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  tags: [repo, debian]
+
+# ── Microsoft: mssql-tools, and .NET where the distro has none ───────────────
+- name: Fetch the Microsoft signing key (Debian/Ubuntu)
+  ansible.builtin.get_url:
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    dest: "{{ __agent_ms_keyring }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: __agent_need_ms_repo | bool
+  tags: [repo, debian]
+
+# Identical to the line roles/mssql/tasks/tools-debian.yml writes, so a host that
+# runs both roles registers the repository once instead of twice.
+- name: Register the Microsoft prod repository (Debian/Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64,armhf,arm64 signed-by={{ __agent_ms_keyring }}]
+      https://packages.microsoft.com/{{ __agent_ms_deb_path }}/prod
+      {{ ansible_distribution_release }} main
+    state: present
+    filename: mssql-release
+    update_cache: false
+  when: __agent_need_ms_repo | bool
+  tags: [repo, debian]
+
+# ⚑ Ubuntu 22.04+ gets .NET from Ubuntu's own feed. The Microsoft repository above
+#   (needed for sqlcmd) also lists dotnet packages, and apt takes the highest
+#   version across both and then fails on the mismatch. Microsoft's documented fix
+#   is to pin its origin out for the dotnet package names.
+- name: Prefer Ubuntu's .NET packages over Microsoft's (Ubuntu 22.04+)
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/dotnet-ubuntu-feed
+    content: |
+      Package: dotnet* aspnet* netstandard*
+      Pin: origin "packages.microsoft.com"
+      Pin-Priority: -10
+    mode: "0644"
+    owner: root
+    group: root
+  when:
+    - agent_install_dotnet | bool
+    - __agent_dotnet_from_ubuntu_feed | bool
+    - __agent_need_ms_repo | bool
+  tags: [repo, debian, dotnet]
+
+# ── Docker CE (packages.txt: get.docker.com) ─────────────────────────────────
+# Same keyring path and line as roles/jumpservers, except the distribution in the
+# URL: jumpservers hard-codes /linux/ubuntu, which has no Debian suites.
+- name: Fetch the Docker signing key (Debian/Ubuntu)
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ __agent_docker_deb_distro }}/gpg"
+    dest: "{{ __agent_docker_keyring }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: install_docker | bool
+  tags: [repo, docker, debian]
+
+- name: Register the Docker repository (Debian/Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by={{ __agent_docker_keyring }}]
+      https://download.docker.com/linux/{{ __agent_docker_deb_distro }}
+      {{ ansible_distribution_release }} stable
+    state: present
+    update_cache: false
+  when: install_docker | bool
+  tags: [repo, docker, debian]
+
+# ── NodeSource: one Node major on every distro ───────────────────────────────
+# ⚑ The distro nodejs is 12 (22.04), 18 (24.04, Debian 12), 10 (20.04) — there is
+#   no common version to take from the distribution.
+# ⚑ THE KEY URL ENDS IN .key. Some firewalls block that file type: the network this
+#   was developed on answers it with a 403 "Blocked download" page, and this task
+#   then fails. Mirror the key internally and set agent_nodesource_key_url if your
+#   VMs are behind the same policy.
+- name: Fetch the NodeSource signing key (Debian/Ubuntu)
+  ansible.builtin.get_url:
+    url: "{{ agent_nodesource_key_url }}"
+    dest: "{{ __agent_nodesource_keyring }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: agent_install_nodejs | bool
+  tags: [repo, nodejs, debian]
+
+- name: Register the NodeSource repository (Debian/Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by={{ __agent_nodesource_keyring }}]
+      https://deb.nodesource.com/node_{{ agent_nodejs_major }}.x nodistro main
+    state: present
+    filename: nodesource
+    update_cache: false
+  when: agent_install_nodejs | bool
+  tags: [repo, nodejs, debian]
+
+# The distro's own nodejs has a different version scheme and can outrank NodeSource's.
+- name: Prefer NodeSource's nodejs over the distribution's (Debian/Ubuntu)
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/nodesource
+    content: |
+      Package: nodejs
+      Pin: origin "deb.nodesource.com"
+      Pin-Priority: 600
+    mode: "0644"
+    owner: root
+    group: root
+  when: agent_install_nodejs | bool
+  tags: [repo, nodejs, debian]

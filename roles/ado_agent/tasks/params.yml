@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# Parameter checks — read-only, no network
+# =============================================================================
+
+- name: Verify the host uses systemd
+  ansible.builtin.assert:
+    that:
+      - ansible_service_mgr == 'systemd'
+    fail_msg: >-
+      The agent's svc.sh installs a systemd unit; this host's service manager is
+      '{{ ansible_service_mgr }}'.
+    success_msg: "systemd is the service manager"
+  tags: [preflight, validate]
+
+- name: Validate required parameters
+  ansible.builtin.assert:
+    that:
+      - ado_org_url | length > 0
+      - ado_org_url is match('^https?://[^/]+')
+      - ado_agent_pool | length > 0
+      - ado_agent_name | length > 0
+      - ado_pat | trim | length > 0
+      - ado_agent_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - required_commands | length > 0
+    fail_msg: >-
+      Set ado_org_url (https://host[:port]/...), ado_agent_pool, ado_agent_name, the PAT
+      (vault_ado_pat in Ansible Vault, or the ADO_PAT environment variable),
+      ado_agent_version (x.y.z) and required_commands. The PAT must not be in source control.
+  tags: [preflight, validate]
+
+# ⚑ NO SECOND AGENT NEXT TO AN OLD ONE. The default directory moved from
+#   /opt/azure-pipelines-agent to /var/agents/agent<N>. A host provisioned by the
+#   earlier version would otherwise get a second agent with the same name, and the
+#   second registration would silently replace the first (--replace) while the first
+#   service kept running.
+- name: Look for an agent at the previous default location
+  ansible.builtin.stat:
+    path: /opt/azure-pipelines-agent/.agent
+  register: __ado_legacy_agent
+  when: ado_agent_root | length == 0
+  tags: [preflight, validate]
+
+- name: An agent at the previous default location must be dealt with first
+  ansible.builtin.assert:
+    that:
+      - not __ado_legacy_agent.stat.exists
+    fail_msg: >-
+      An agent is already configured in /opt/azure-pipelines-agent, the old default
+      directory. Set ado_agent_root: /opt/azure-pipelines-agent to keep managing it there,
+      or retire it with your organization's procedure before provisioning under
+      {{ ado_agents_dir }}.
+  when: ado_agent_root | length == 0
+  tags: [preflight, validate]

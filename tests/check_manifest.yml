@@ -1,0 +1,21 @@
+---
+# One packages.txt item: if it is `installed` or `deviation`, the packages and
+# commands the manifest names must be what the role resolves, on both families.
+# install_docker is switched on only for the docker item.
+
+- name: Items that carry a reason say so
+  ansible.builtin.assert:
+    that:
+      - item_entry.note is defined
+    fail_msg: "{{ item_entry.id }} is '{{ item_entry.disposition }}' and must explain why in `note`."
+    quiet: true
+  when: item_entry.disposition in ['superseded', 'not-ported', 'deviation']
+
+- name: Check the item on both families
+  ansible.builtin.include_tasks: check_manifest_family.yml
+  loop:
+    - {family: Debian, distribution: Ubuntu, version: "22.04", major: "22", release: jammy, key: debian}
+    - {family: RedHat, distribution: RedHat, version: "9.6", major: "9", release: Plow, key: redhat}
+  loop_control:
+    loop_var: fam
+  when: item_entry.disposition in ['installed', 'deviation']

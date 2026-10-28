@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# Real install of agent_packages on a disposable host, then a smoke test
+# =============================================================================
+# Driven by tests/run-matrix.sh against throwaway containers. Not for real hosts.
+#
+# The post_tasks run each tool the way a pipeline would and fail on a bad exit
+# code, so "installed" means "runs", not "the package manager said yes".
+
+- name: Install the build-agent tooling and smoke-test it
+  hosts: all
+  gather_facts: true
+  vars:
+    # Containers have no systemd; packages still install, only the Docker start is skipped.
+    agent_manage_services: false
+    smoke_enabled: >-
+      {{ {'dotnet': agent_install_dotnet | default(true), 'java': agent_install_java | default(true),
+          'maven': agent_install_maven | default(true), 'sqlcmd': agent_install_sqlcmd | default(true),
+          'nodejs': agent_install_nodejs | default(true), 'kubectl': agent_install_kubectl | default(true),
+          'helm': agent_install_helm | default(true), 'yq': agent_install_yq | default(true),
+          'azcopy': agent_install_azcopy | default(true), 'docker': install_docker | default(false)} }}
+  roles:
+    - role: agent_packages
+
+  post_tasks:
+    - name: Run each installed tool
+      ansible.builtin.command:
+        argv: ["bash", "-lc", "{{ item.cmd }}"]
+      loop:
+        - {tool: dotnet, cmd: "dotnet --list-sdks | grep -q '^8\\.0\\.' && dotnet --list-runtimes | grep -q 'Microsoft.AspNetCore.App 8\\.0' && echo ok"}
+        - {tool: dotnet, cmd: "dotnet-ef --version | grep -q '8.0.11' && echo ok"}
+        - {tool: java, cmd: "javac -version 2>&1"}
+        - {tool: maven, cmd: "/opt/maven/bin/mvn -v | head -1"}
+        - {tool: sqlcmd, cmd: "sqlcmd -? | head -2"}
+        - {tool: nodejs, cmd: "node --version && npm --version"}
+        - {tool: kubectl, cmd: "kubectl version --client"}
+        - {tool: helm, cmd: "helm version --short"}
+        - {tool: yq, cmd: "yq --version"}
+        - {tool: azcopy, cmd: "azcopy --version"}
+        - {tool: docker, cmd: "docker --version"}
+      loop_control:
+        label: "{{ item.tool }}: {{ item.cmd | truncate(60) }}"
+      when: smoke_enabled[item.tool] | bool
+      register: smoke
+      changed_when: false
+
+    - name: Show the smoke results
+      ansible.builtin.debug:
+        msg: "{{ item.item.tool }}: {{ item.stdout_lines | default([]) | first | default('') }}"
+      loop: "{{ smoke.results }}"
+      loop_control:
+        label: "{{ item.item.tool }}"
+      when: item is not skipped

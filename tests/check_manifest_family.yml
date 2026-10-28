@@ -1,0 +1,25 @@
+---
+- name: "Mock the facts for {{ fam.distribution }}"
+  ansible.builtin.set_fact:
+    ansible_distribution: "{{ fam.distribution }}"
+    ansible_distribution_version: "{{ fam.version }}"
+    ansible_distribution_major_version: "{{ fam.major }}"
+    ansible_distribution_release: "{{ fam.release }}"
+    ansible_os_family: "{{ fam.family }}"
+    ansible_architecture: x86_64
+    install_docker: "{{ item_entry.docker | default(false) }}"
+
+- name: "Check the manifest item against the resolved packages of {{ fam.family }}"
+  ansible.builtin.assert:
+    that:
+      - item_entry[fam.key] | difference(agent_resolved_packages) | length == 0
+      - item_entry.commands | default([]) | difference(agent_resolved_commands) | length == 0
+    fail_msg: >-
+      packages.txt item '{{ item_entry.id }}' (lines {{ item_entry.lines }}) is not covered on {{ fam.family }}:
+      packages missing {{ item_entry[fam.key] | difference(agent_resolved_packages) }},
+      commands missing {{ item_entry.commands | default([]) | difference(agent_resolved_commands) }}
+    quiet: true
+
+- name: Restore the default
+  ansible.builtin.set_fact:
+    install_docker: false

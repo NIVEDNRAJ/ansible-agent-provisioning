@@ -1,0 +1,45 @@
+---
+- name: Mock the facts
+  ansible.builtin.include_tasks: _set_facts.yml
+
+# The real preflight file, not a copy of its logic.
+- name: "Preflight accepts {{ platform.name }}"
+  ansible.builtin.include_tasks: "{{ role_dir }}/tasks/preflight_platform.yml"
+
+- name: "Resolved packages are the expected ones for {{ platform.name }}"
+  ansible.builtin.assert:
+    that:
+      - platform.include | difference(agent_resolved_packages) | length == 0
+      - platform.exclude | intersect(agent_resolved_packages) | length == 0
+    fail_msg: >-
+      {{ platform.name }}: missing {{ platform.include | difference(agent_resolved_packages) }};
+      unexpected {{ platform.exclude | intersect(agent_resolved_packages) }};
+      resolved {{ agent_resolved_packages }}
+    quiet: true
+
+# Every resolved name is a plain package name — no unrendered template, no empty entry.
+- name: "Resolved package names are well formed for {{ platform.name }}"
+  ansible.builtin.assert:
+    that:
+      - agent_resolved_packages | length > 0
+      # a package name, or an absolute path spec such as /usr/bin/curl
+      - agent_resolved_packages | select('match', '^(/[A-Za-z0-9._/-]+|[A-Za-z0-9][A-Za-z0-9.+_-]*)$') | list | length == agent_resolved_packages | length
+      - agent_resolved_packages | unique | length == agent_resolved_packages | length
+    fail_msg: "{{ platform.name }}: malformed or duplicate package names in {{ agent_resolved_packages }}"
+    quiet: true
+
+- name: "Platform decisions for {{ platform.name }}"
+  ansible.builtin.assert:
+    that:
+      - platform.expect.dotnet_from_ubuntu_feed is not defined or (__agent_dotnet_from_ubuntu_feed | bool) == platform.expect.dotnet_from_ubuntu_feed
+      - platform.expect.need_ms_repo is not defined or (__agent_need_ms_repo | bool) == platform.expect.need_ms_repo
+      - platform.expect.ms_deb_path is not defined or (__agent_ms_deb_path | trim) == platform.expect.ms_deb_path
+      - platform.expect.docker_distro is not defined or __agent_docker_deb_distro == platform.expect.docker_distro
+      - platform.expect.docker_rpm_distro is not defined or __agent_docker_rpm_distro == platform.expect.docker_rpm_distro
+      - platform.expect.crb_repo is not defined or agent_crb_repo == platform.expect.crb_repo
+      - platform.expect.java_deviates is not defined or (agent_java_deviates | bool) == platform.expect.java_deviates
+    fail_msg: >-
+      {{ platform.name }}: expected {{ platform.expect }}; got
+      ubuntu_feed={{ __agent_dotnet_from_ubuntu_feed }} ms_repo={{ __agent_need_ms_repo }}
+      ms_deb_path={{ __agent_ms_deb_path | trim }} crb={{ agent_crb_repo }} java_deviates={{ agent_java_deviates }}
+    quiet: true
