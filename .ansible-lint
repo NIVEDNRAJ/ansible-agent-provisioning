@@ -2,6 +2,8 @@
 exclude_paths:
   - tests/docker/
   - integration/
+  - .venv/
+  - venv/
 
 skip_list:
   # The two roles share an `agent_` / `ado_agent_` component prefix, as Core Infra's

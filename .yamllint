@@ -5,6 +5,8 @@ extends: default
 # `{ role: ../roles/x/ }`) so it drops in unchanged; it is syntax-checked instead.
 ignore: |
   integration/
+  .venv/
+  venv/
 
 rules:
   # Role comments carry the reasoning behind a choice and run long.

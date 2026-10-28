@@ -1,0 +1,4 @@
+# LF everywhere, including on Windows checkouts. The shell scripts in tests/ and the
+# Agent.Listener test double are copied into Linux containers, and bash cannot run a
+# script whose lines end in CRLF ("bash\r: No such file or directory").
+* text=auto eol=lf
