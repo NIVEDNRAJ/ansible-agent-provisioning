@@ -30,8 +30,10 @@ kubectl_version: "v1.30.4"
 helm_version: "3.19.4"
 yq_version: "4.44.5"
 
-# .NET 8 and dotnet-ef 8.0.11 are what packages.txt 21-35 pin.
-agent_dotnet_channel: "8.0"
+# .NET 8, 10 and dotnet-ef 8.0.11 are what packages.txt 21-35 pin.
+agent_dotnet_channels:
+  - "8.0"
+  - "10.0"
 agent_dotnet_ef_version: "8.0.11"
 
 # ⚑ packages.txt line 86 installs Node 10 (nodesource setup_10.x), which is end
