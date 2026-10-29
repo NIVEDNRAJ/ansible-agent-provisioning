@@ -46,7 +46,7 @@ export ADO_PAT='your-pat-value'
 # 2. provision one agent: /var/agents/agent1, named as given
 ansible-playbook playbooks/setup-agent.yml \
   -e 'agent_vm_ip=10.10.1.25' -e 'ssh_user=devopsadmin' \
-  -e 'ado_org_url=https://ntp-tfs.nestdigital.com:8082/' \
+  -e 'ado_org_url=<URL>' \
   -e 'ado_agent_pool=TransactHub-Pool' \
   -e 'ado_agent_name=transacthub-agent-04' \
   -e 'ado_agent_version=3.x.y'          # whichever major the server ships — see Server compatibility
@@ -147,7 +147,7 @@ Defaults are in `roles/*/defaults/main.yml`; override in inventory or with `-e`.
 
 ## Server compatibility
 
-The agent's major version has to suit the server, and **the default `ado_agent_version` (4.261.0) is not known to suit yours.** Microsoft documents the 4.x agent (.NET 8) for Azure DevOps Services and current Azure DevOps Server, and gives the 3.x agent as the guidance for Azure DevOps Server 2022 and 2020 ([Linux agent page](https://learn.microsoft.com/azure/devops/pipelines/agents/linux-agent), [v4 agent](https://learn.microsoft.com/azure/devops/pipelines/agents/v4-agent)). Releases older than those may need older again. Your server (`ntp-tfs.nestdigital.com:8082`) does not reveal its version to an anonymous request, so this was **not** determined here.
+The agent's major version has to suit the server, and **the default `ado_agent_version` (4.261.0) is not known to suit yours.** Microsoft documents the 4.x agent (.NET 8) for Azure DevOps Services and current Azure DevOps Server, and gives the 3.x agent as the guidance for Azure DevOps Server 2022 and 2020 ([Linux agent page](https://learn.microsoft.com/azure/devops/pipelines/agents/linux-agent), [v4 agent](https://learn.microsoft.com/azure/devops/pipelines/agents/v4-agent)). Releases older than those may need older again. Your server (`<URL>`) does not reveal its version to an anonymous request, so this was **not** determined here.
 
 What the project does about it:
 
