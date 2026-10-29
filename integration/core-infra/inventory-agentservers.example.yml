@@ -6,7 +6,8 @@
 #   ansible_become_pass in plain text; do not copy that. Use a key (ansible_ssh_private_key_file)
 #   and sudo without a password, or put the secrets in Ansible Vault.
 # ⚑ THE PAT IS NOT AN INVENTORY VARIABLE. Put `vault_ado_pat` in an Ansible Vault file
-#   (ansible-vault create group_vars/vault.yml) and run with --ask-vault-pass, or export
+#   (ansible-vault create group_vars/agentservers/vault.yml next to the playbook or the inventory;
+#   the folder is named after the group, or Ansible never loads it) and run with --ask-vault-pass, or export
 #   ADO_PAT in the controller shell. The role reads whichever it finds, vault first.
 agentservers:
   hosts:

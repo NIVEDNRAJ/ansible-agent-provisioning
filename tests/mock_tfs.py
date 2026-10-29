@@ -28,7 +28,19 @@ from urllib.parse import parse_qs, urlparse
 
 GOOD = "good-pat-SECRET-1"
 FORBIDDEN = "forbidden-pat-SECRET-2"
-PREFIXES = {"/v4": "4.258.1", "/v3": "3.246.0", "/nopkg": None}
+# What the packages/agent endpoint puts in "version". Azure DevOps Services answers with a
+# string; an on-premises Azure DevOps Server / TFS answers with an object, which is what the
+# first real run met ("'dict object' has no attribute 'split'"). /empty has no packages at all
+# and /odd has a version that is neither, both of which must read as "the server did not say".
+PREFIXES = {
+    "/v4": "4.258.1",
+    "/v3": "3.246.0",
+    "/v3obj": {"major": 3, "minor": 246, "patch": 0},
+    "/v4obj": {"major": 4, "minor": 258},
+    "/empty": [],
+    "/odd": {"text": "three"},
+    "/nopkg": None,
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -70,6 +82,8 @@ class Handler(BaseHTTPRequestHandler):
             version = PREFIXES[prefix]
             if version is None:
                 return self.reply(404, {"message": "no packages endpoint"})
+            if version == []:
+                return self.reply(200, {"count": 0, "value": []})
             return self.reply(200, {"count": 1, "value": [{"version": version, "platform": "linux-x64"}]})
         return self.reply(404, {"message": "no such route"})
 

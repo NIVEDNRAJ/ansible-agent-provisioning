@@ -168,11 +168,16 @@ The PAT is resolved in this order: the Ansible Vault variable **`vault_ado_pat`*
 - **not in `.credentials` for others.** The agent's credential files are set `0600`, owned by the agent user.
 
 ```bash
-ansible-vault create group_vars/vault.yml          # contains:  vault_ado_pat: "the-pat"
+# Ansible reads group_vars only from the folders NEXT TO THE PLAYBOOK (playbooks/) and next to
+# the inventory, and group_vars/<name>/ only for hosts in the group <name>. So the folder is named
+# after the group — agent_targets here, agentservers in Core Infra. A plain group_vars/vault.yml,
+# or one at the top of the project, is never read.
+mkdir -p playbooks/group_vars/agent_targets
+ansible-vault create playbooks/group_vars/agent_targets/vault.yml    # contains:  vault_ado_pat: "the-pat"
 ansible-playbook playbooks/setup-agent.yml ... --ask-vault-pass
 ```
 
-`group_vars/vault.yml` is in `.gitignore`. Use the minimum PAT scope: **Agent Pools (Read & manage)**. Do not put the PAT in `-e`, an inventory, or `group_vars/all.yml`.
+`playbooks/group_vars/*/vault.yml` is in `.gitignore`. Use the minimum PAT scope: **Agent Pools (Read & manage)**. Do not put the PAT in an inventory or in `playbooks/group_vars/all.yml` (the site values file: org URL, pool, name).
 
 ## Idempotency, failure handling and existing agents
 

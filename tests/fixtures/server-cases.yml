@@ -32,6 +32,39 @@ cases:
     pool: Default
     expect: {pass: true, server_agent: "", same_major: false}
 
+  # The on-premises shape: "version" is an object, not a string. This was the real server's
+  # answer and crashed the first version of the check.
+  - name: an on-premises server that reports the version as an object is read (enforcement off, pinned major is 4)
+    url: http://127.0.0.1:8099/v3obj
+    pat: good-pat-SECRET-1
+    pool: Default
+    enforce: false
+    expect: {pass: true, server_agent: "3.246.0", same_major: false}
+
+  - name: an object version of a different major stops the run, naming it as 3.246.0
+    url: http://127.0.0.1:8099/v3obj
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: false, error: 'does not match what the server ships \(.3\.246\.0.\).*Set ado_agent_version to a 3\.x'}
+
+  - name: an object version without a patch number is read, missing parts as 0
+    url: http://127.0.0.1:8099/v4obj
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: true, server_agent: "4.258.0", same_major: true}
+
+  - name: an empty package list is reported unverified, not a crash
+    url: http://127.0.0.1:8099/empty
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: true, server_agent: "", same_major: false}
+
+  - name: a version in a shape nobody documents is reported unverified, not a crash
+    url: http://127.0.0.1:8099/odd
+    pat: good-pat-SECRET-1
+    pool: Default
+    expect: {pass: true, server_agent: "", same_major: false}
+
   - name: a wrong PAT is named as rejected
     url: http://127.0.0.1:8099/v4
     pat: wrong-pat-SECRET-3

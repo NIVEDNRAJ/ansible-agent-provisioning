@@ -81,11 +81,27 @@
   no_log: true
   tags: [preflight, server]
 
+# ⚑ THE SHAPE OF `version` DIFFERS BETWEEN SERVERS. Azure DevOps Services answers with a
+#   string ("4.261.0"); an on-premises Azure DevOps Server / TFS answers with an object
+#   ({"major": 3, "minor": 246, "patch": 0}) — the one this was first run against. Both are
+#   read; anything else (missing, empty list, null) is "the server did not say", which is
+#   reported as unverified, never a failure of the preflight itself.
+- name: Read the version the server reports
+  ansible.builtin.set_fact:
+    __ado_server_agent_raw: >-
+      {{ (__ado_pkg_reply.json.value[0].version | default(''))
+         if ((__ado_pkg_reply.status | default(0) | int) == 200
+             and (__ado_pkg_reply.json.value | default([]) | length) > 0)
+         else '' }}
+  tags: [preflight, server]
+
 - name: Work out the server's agent version
   ansible.builtin.set_fact:
     __ado_server_agent: >-
-      {{ (__ado_pkg_reply.json.value[0].version | default(''))
-         if (__ado_pkg_reply.status | default(0) | int) == 200 else '' }}
+      {{ ([__ado_server_agent_raw.major, __ado_server_agent_raw.minor | default(0), __ado_server_agent_raw.patch | default(0)]
+          | map('string') | join('.'))
+         if (__ado_server_agent_raw is mapping and __ado_server_agent_raw.major is defined)
+         else (__ado_server_agent_raw | string if (__ado_server_agent_raw is string or __ado_server_agent_raw is number) else '') }}
   tags: [preflight, server]
 
 - name: Compare the major versions
