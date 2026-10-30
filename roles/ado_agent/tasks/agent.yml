@@ -36,18 +36,26 @@
   when: __ado_cfg.stat.exists
   tags: [agent]
 
+# ⚑ THE REAL AGENT WRITES .agent WITH A UTF-8 BYTE-ORDER MARK. from_json refuses a BOM
+#   ("Unexpected UTF-8 BOM"), which failed a run against an agent that was configured
+#   correctly. The mark is removed before parsing; the test double writes it too.
+- name: Parse the existing agent configuration
+  ansible.builtin.set_fact:
+    __ado_cfg_data: "{{ __ado_cfg_content.content | b64decode | replace('﻿', '') | from_json }}"
+  when: __ado_cfg.stat.exists
+  tags: [agent]
+
 - name: Refuse to silently reuse an agent configured with different parameters
   ansible.builtin.assert:
     that:
-      - (__ado_cfg_content.content | b64decode | from_json).agentName == agent.name
-      - (__ado_cfg_content.content | b64decode | from_json).poolName == ado_agent_pool
-      - (__ado_cfg_content.content | b64decode | from_json).serverUrl | default('') | lower | regex_replace('/+$', '')
+      - __ado_cfg_data.agentName | default('') == agent.name
+      - __ado_cfg_data.poolName | default('') == ado_agent_pool
+      - __ado_cfg_data.serverUrl | default('') | lower | regex_replace('/+$', '')
         == ado_org_url | lower | regex_replace('/+$', '')
     fail_msg: >-
       {{ agent.root }} is already configured for a different agent name, pool or server
-      (it holds '{{ (__ado_cfg_content.content | b64decode | from_json).agentName }}' in pool
-      '{{ (__ado_cfg_content.content | b64decode | from_json).poolName }}' on
-      '{{ (__ado_cfg_content.content | b64decode | from_json).serverUrl | default('?') }}').
+      (it holds '{{ __ado_cfg_data.agentName | default('?') }}' in pool
+      '{{ __ado_cfg_data.poolName | default('?') }}' on '{{ __ado_cfg_data.serverUrl | default('?') }}').
       Reconfigure it deliberately using your organization's agent retirement procedure.
   when: __ado_cfg.stat.exists
   tags: [agent]

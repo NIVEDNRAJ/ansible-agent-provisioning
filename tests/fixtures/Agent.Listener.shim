@@ -47,8 +47,10 @@ case "$cmd" in
       exit 1
     fi
 
-    printf '{"agentName":"%s","poolName":"%s","serverUrl":"%s","workFolder":"%s"}\n' \
-      "$agent" "$pool" "$url" "$work" > .agent
+    # The real agent starts this file with a UTF-8 byte-order mark; the role must read it.
+    { printf '\357\273\277'
+      printf '{"agentName":"%s","poolName":"%s","serverUrl":"%s","workFolder":"%s"}\n' \
+        "$agent" "$pool" "$url" "$work"; } > .agent
     # 0644 on purpose: the role must tighten these whatever the agent created them as.
     (umask 022; echo '{}' > .credentials; echo '{}' > .credentials_rsaparams)
 
