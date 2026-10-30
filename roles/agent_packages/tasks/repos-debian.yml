@@ -6,6 +6,13 @@
 #   roles/mssql/tasks/install-debian.yml: apt_key is removed in ansible-core 2.17
 #   and trusts a key for every repository on the host.
 
+# ⚑ FIRST, BEFORE ANY apt CALL. A host whose apt sources already conflict cannot run apt at all
+#   ("The list of sources could not be read"), including the prerequisites task below, so the
+#   repositories the host already defines are looked at, and a duplicate this role left
+#   behind is repaired, before apt is used.
+- name: Find repositories the host already defines
+  ansible.builtin.import_tasks: existing.yml
+
 - name: Install repository prerequisites (Debian/Ubuntu)
   ansible.builtin.apt:
     name: [ca-certificates, gnupg]
@@ -23,9 +30,6 @@
     group: root
   tags: [repo, debian]
 
-# Which of Microsoft / Docker / NodeSource the host already has. Those are reused below.
-- name: Find repositories the host already defines
-  ansible.builtin.import_tasks: existing.yml
 
 # ── Microsoft: mssql-tools, and .NET where the distro has none ───────────────
 - name: Fetch the Microsoft signing key (Debian/Ubuntu)

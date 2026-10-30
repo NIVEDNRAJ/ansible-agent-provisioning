@@ -44,6 +44,39 @@
               | list) }}
   tags: [repo, debian]
 
+# ── repair: a duplicate this role (or Core Infra's mssql role) registered earlier ─────────
+# ⚑ A host can already be broken by an earlier run: the host's own source for a repository
+#   (e.g. microsoft-prod.list, signed-by=/usr/share/keyrings/microsoft-prod.gpg) AND a second
+#   one this role wrote for the same URL (signed-by=/etc/apt/keyrings/microsoft.asc). apt then
+#   refuses every command, so nothing can be installed until one of them is gone. The one
+#   that goes is OURS: a file in which EVERY active line names this role's keyring. A file
+#   with any other active line is left alone, and apt's own error is then what you see. The
+#   host's definition, and the key file, are not touched.
+- name: Look for a duplicate registration of this role's own (Debian/Ubuntu)
+  ansible.builtin.shell: |
+    set -o pipefail
+    for f in $(grep -rIlsF -- {{ item.item.ours | quote }} /etc/apt/sources.list.d 2>/dev/null); do
+      if ! grep -vE '^[[:space:]]*(#|$)' "$f" | grep -vF -- {{ item.item.ours | quote }} | grep -q .; then
+        echo "$f"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  loop: "{{ __agent_existing_repos.results | selectattr('stdout', 'defined') | selectattr('stdout_lines') | list }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  register: __agent_own_duplicates
+  changed_when: false
+  check_mode: false
+  tags: [repo, debian]
+
+- name: Remove this role's own duplicate registration (Debian/Ubuntu)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ __agent_own_duplicates.results | selectattr('stdout_lines', 'defined') | map(attribute='stdout_lines') | flatten | unique | list }}"
+  tags: [repo, debian]
+
 - name: Report the repositories that are used as they are (Debian/Ubuntu)
   ansible.builtin.debug:
     msg: >-

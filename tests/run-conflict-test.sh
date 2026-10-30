@@ -178,6 +178,56 @@ if want ubuntu-22.04; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 10  THE STATE A REAL VM WAS FOUND IN. The host has Microsoft's and Docker's own sources
+#     (microsoft-prod.list, signed-by=/usr/share/keyrings/...) AND a second source for each
+#     that an earlier run of this role wrote (signed-by=/etc/apt/keyrings/*.asc). apt refuses
+#     every command: "Conflicting values set for option Signed-By ... The list of sources
+#     could not be read". The role must repair it itself, removing only its own duplicates.
+dup_repair() { # dup_repair <name> <image>
+  local name="$1" image="$2" c L="$RESULTS_DIR/dup-$1" ver code
+  c="$(start "dup-$name" "$image" deb)" || { bad 10 "$name: container did not start"; return; }
+  ver="$(docker exec "$c" sh -c '. /etc/os-release; echo $VERSION_ID')"
+  code="$(docker exec "$c" sh -c '. /etc/os-release; echo $VERSION_CODENAME')"
+  sh_in "$c" "
+    install -d -m 0755 /usr/share/keyrings /etc/apt/keyrings
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    cp /usr/share/keyrings/microsoft-prod.gpg /etc/apt/keyrings/microsoft.asc
+    cp /usr/share/keyrings/docker-archive-keyring.gpg /etc/apt/keyrings/docker.asc
+    echo 'deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/$ver/prod $code main' > /etc/apt/sources.list.d/microsoft-prod.list
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $code stable' > /etc/apt/sources.list.d/docker.list
+    echo 'deb [arch=amd64,armhf,arm64 signed-by=/etc/apt/keyrings/microsoft.asc] https://packages.microsoft.com/ubuntu/$ver/prod $code main' > /etc/apt/sources.list.d/mssql-release.list
+    echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $code stable' > /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list" \
+    >"$L-seed.log" 2>&1 || { bad 10 "$name: could not seed the broken state ($L-seed.log)"; docker rm -f "$c" >/dev/null 2>&1; return; }
+  if sh_in "$c" 'apt-get update 2>&1 | grep -q "Conflicting values set for option Signed-By"'; then
+    ok "10-$name" "precondition: apt really is broken (Conflicting values set for option Signed-By)"
+  else
+    bad "10-$name" "precondition: the seeded host is not broken, so this test proves nothing"
+  fi
+  if play "$c" "$L-run.log" tests/test_install.yml "${MINIMAL[@]}" -e agent_install_sqlcmd=true -e install_docker=true; then
+    ok "10a-$name" "role succeeds on the broken host"
+    check "10b-$name" "apt update is clean now" sh_in "$c" 'apt-get update 2>&1 | tee /tmp/u.log | tail -1; ! grep -q "Conflicting values" /tmp/u.log && ! grep -q "^E:" /tmp/u.log'
+    check "10c-$name" "the role's own duplicate files are gone" sh_in "$c" '! test -e /etc/apt/sources.list.d/mssql-release.list && ! test -e /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list'
+    check "10d-$name" "the host's own sources are untouched" sh_in "$c" 'grep -q microsoft-prod.gpg /etc/apt/sources.list.d/microsoft-prod.list && grep -q docker-archive-keyring.gpg /etc/apt/sources.list.d/docker.list'
+    n="$(count_in "$c" 'grep -rhE "^deb .*(packages\.microsoft\.com|download\.docker\.com)" /etc/apt/sources.list /etc/apt/sources.list.d | wc -l')"
+    [[ "$n" == 2 ]] && ok "10e-$name" "exactly one source each for Microsoft and Docker" || bad "10e-$name" "expected 2 sources (one each), found $n"
+    check "10f-$name" "the removal was reported" grep -q "duplicate registration" "$L-run.log"
+    check "10g-$name" "sqlcmd and docker run" sh_in "$c" '/opt/mssql-tools/bin/sqlcmd -? | head -1 && docker --version'
+  else
+    bad "10a-$name" "role failed on the broken host (see $L-run.log)"
+  fi
+  # Second run: nothing left to repair, nothing to change.
+  if play "$c" "$L-run2.log" tests/test_install.yml "${MINIMAL[@]}" -e agent_install_sqlcmd=true -e install_docker=true && grep -Eq 'changed=0 ' "$L-run2.log"; then
+    ok "10h-$name" "second run changed=0"
+  else
+    bad "10h-$name" "second run not clean: $(grep -E 'changed=' "$L-run2.log" | tail -1 | xargs)"
+  fi
+  docker rm -f "$c" >/dev/null 2>&1
+}
+want ubuntu-24.04 && { echo "== ubuntu-24.04 (the release of the VM this was found on)"; dup_repair u2404 ubuntu:24.04; }
+want ubuntu-22.04 && { echo "== ubuntu-22.04, same broken state"; dup_repair u2204 ubuntu:22.04; }
+
+# ─────────────────────────────────────────────────────────────────────────────
 if want rhel-9; then
   echo "== rhel-9 (almalinux:9)"
   c="$(start rhel-9 almalinux:9 rpm)" || { bad setup "container did not start"; c=""; }
