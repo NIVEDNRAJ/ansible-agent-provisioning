@@ -1,0 +1,116 @@
+---
+# =============================================================================
+# Simulate the install: refuse what would remove or break the host's packages
+# =============================================================================
+# Runs after the repositories are registered (the simulation needs them) and before the
+# real install. Nothing is installed or removed here, and a refusal says so; third-party
+# repositories may already have been registered by then, which is harmless and idempotent.
+# The conflicts that can be seen by name alone are checked earlier, in conflicts.yml,
+# before any repository is touched.
+#
+#   agent_remove_packages: [...]           remove exactly these first (conflicts.yml)
+#   agent_allow_package_removal: true      accept what the package manager decides
+#   (or turn the tool off:                 install_docker=false, agent_install_nodejs=false)
+
+# ⚑ NOT IN --check. A dry run registers no repository, so packages that come from one
+#   (mssql-tools, docker-ce, nodejs) would not resolve and the simulation would fail on a
+#   host the real run handles fine. The by-name checks in conflicts.yml still run.
+
+# ── Debian family: apt-get --simulate ────────────────────────────────────────
+# Only what is not installed yet: `state: present` leaves an installed package alone, but
+# `apt-get install` would also upgrade it, and the simulation must not report removals the
+# real run will never make.
+- name: Simulate the installation (Debian/Ubuntu)
+  when:
+    - ansible_os_family == "Debian"
+    - not ansible_check_mode
+  tags: [packages, guard]
+  block:
+    - name: Work out which packages are still to be installed
+      ansible.builtin.set_fact:
+        __agent_to_install: "{{ agent_resolved_packages | difference(__agent_installed) }}"
+
+    # The repositories were registered without refreshing the index, so refresh it, or the
+    # simulation would not see them.
+    - name: Refresh the package index before simulating
+      ansible.builtin.apt:
+        update_cache: true
+      when: __agent_to_install | length > 0
+
+    - name: Simulate the installation
+      ansible.builtin.command:
+        argv: "{{ ['apt-get', '--simulate', 'install'] + __agent_to_install }}"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        ACCEPT_EULA: "Y"
+      register: __agent_simulation
+      failed_when: false
+      changed_when: false
+      when: __agent_to_install | length > 0
+
+    - name: Read what the simulation would remove
+      ansible.builtin.set_fact:
+        __agent_sim_removals: >-
+          {{ __agent_simulation.stdout_lines | default([])
+             | select('match', '^Remv ')
+             | map('regex_replace', '^Remv ([^ ]+).*$', '\1') | list }}
+      when: __agent_to_install | length > 0
+
+    - name: The installation must be resolvable and must remove nothing
+      ansible.builtin.assert:
+        that:
+          - __agent_simulation.rc == 0
+          - __agent_sim_removals | length == 0 or agent_allow_package_removal | bool
+        fail_msg: >-
+          {% if __agent_simulation.rc != 0 %}apt cannot resolve this installation on {{ inventory_hostname }}.
+          {{ ((__agent_simulation.stdout_lines | default([])) + (__agent_simulation.stderr_lines | default([]))) | select('search', '^(E:|The following|  )') | list | join(' | ') | truncate(900) }}
+          {% else %}Installing {{ __agent_to_install | length }} packages would REMOVE
+          {{ __agent_sim_removals | join(', ') }} from {{ inventory_hostname }}. Nothing has been changed.
+          To leave that software alone, turn off the tool that needs the replacement
+          (install_docker=false, agent_install_nodejs=false, ...); to allow exactly this removal set
+          agent_remove_packages={{ __agent_sim_removals | to_json }}; to accept whatever the package
+          manager decides set agent_allow_package_removal=true.{% endif %}
+        success_msg: "apt can install the packages without removing anything"
+      when: __agent_to_install | length > 0
+
+# ── RedHat family: dnf --assumeno ────────────────────────────────────────────
+# --assumeno resolves the transaction, prints it, and answers "no": rc 1 even when the
+# resolution is fine, so the verdict is read from the text, not the exit code. dnf 4 (EL8,
+# EL9) and dnf 5 (EL10) word it differently; both start the removal lines with "Removing".
+- name: Simulate the installation (RHEL/CentOS)
+  when:
+    - ansible_os_family == "RedHat"
+    - not ansible_check_mode
+  tags: [packages, guard]
+  block:
+    - name: Simulate the installation
+      ansible.builtin.command:
+        argv: >-
+          {{ ['dnf', 'install', '--assumeno']
+             + (['--enablerepo', agent_crb_repo] if agent_install_sqlcmd | bool else [])
+             + agent_resolved_packages }}
+      environment:
+        ACCEPT_EULA: "Y"
+      register: __agent_simulation
+      failed_when: false
+      changed_when: false
+
+    - name: Read the simulation
+      ansible.builtin.set_fact:
+        __agent_sim_text: "{{ (__agent_simulation.stdout | default('')) ~ '\n' ~ (__agent_simulation.stderr | default('')) }}"
+
+    - name: The installation must be resolvable and must remove nothing
+      ansible.builtin.assert:
+        that:
+          - not (__agent_sim_text is search('(?m)^\s*(Error:|Problem[ 0-9]*:|Failed to resolve|No match for argument)'))
+          - not (__agent_sim_text is search('(?m)^\s*(Removing|Remove\s+[0-9]+\s+Package)')) or agent_allow_package_removal | bool
+        fail_msg: >-
+          {% if __agent_sim_text is search('(?m)^\s*(Error:|Problem[ 0-9]*:|Failed to resolve|No match for argument)') %}dnf cannot resolve this installation on {{ inventory_hostname }}:
+          {{ __agent_sim_text.splitlines() | select('search', '(Error|Problem|conflicts|requires|nothing provides|No match|Failed)') | list | join(' | ') | truncate(900) }}
+          {% else %}Installing the packages on {{ inventory_hostname }} would REMOVE installed packages:
+          {{ __agent_sim_text.splitlines() | select('search', '^\s+\S+\s+(x86_64|noarch|i686)\s') | list | join(' | ') | truncate(700) }}
+          Nothing has been changed. To leave that software alone, turn off the tool that needs the
+          replacement (install_docker=false, agent_install_nodejs=false, ...); to allow exactly this
+          removal name the packages in agent_remove_packages; to accept whatever dnf decides set
+          agent_allow_package_removal=true.{% endif %}
+        success_msg: "dnf can install the packages without removing anything"

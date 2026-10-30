@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# Repositories the host already defines (Debian family)
+# =============================================================================
+# ⚑ ONE REPOSITORY, ONE SIGNING KEY. If /etc/apt already has a source for the same URL
+#   — added by hand, by Docker's or NodeSource's setup instructions, or by Microsoft's
+#   packages-microsoft-prod.deb — and this role adds its own line with a different
+#   signed-by= file, apt refuses every later `apt update` on the host:
+#
+#     E: Conflicting values set for option Signed-By regarding source <url>: <a> != <b>
+#
+#   That breaks every other tool on the machine, not just this role, so a repository that
+#   is already there is used as it is and this role registers nothing for it. A line that
+#   names this role's own keyring is not foreign: that is this role's previous run (or an
+#   identical definition), and it is managed as before.
+#
+#   Read-only. Active lines only: comments are ignored. deb822 (*.sources) files are
+#   covered because the check is on the URL, not on the file format.
+
+- name: Look for repository definitions the host already has (Debian/Ubuntu)
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -rIsE -- {{ item.pattern | quote }} /etc/apt/sources.list /etc/apt/sources.list.d \
+      | grep -vE '^[^:]*:[[:space:]]*#' \
+      | grep -vF -- {{ item.ours | quote }} || true
+  args:
+    executable: /bin/bash
+  loop: "{{ __agent_repo_probes }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - agent_reuse_existing_repos | bool
+    - item.wanted | bool
+  register: __agent_existing_repos
+  changed_when: false
+  check_mode: false
+  tags: [repo, debian]
+
+- name: Work out which repositories are reused
+  ansible.builtin.set_fact:
+    __agent_reuse_repo: >-
+      {{ dict((__agent_existing_repos.results | selectattr('stdout', 'defined') | map(attribute='item.key') | list)
+              | zip(__agent_existing_repos.results | selectattr('stdout', 'defined') | map(attribute='stdout_lines') | list)
+              | list) }}
+  tags: [repo, debian]
+
+- name: Report the repositories that are used as they are (Debian/Ubuntu)
+  ansible.builtin.debug:
+    msg: >-
+      The {{ item.key }} repository is already defined on this host
+      ({{ item.value | first | regex_replace(':.*$', '') }}), so it is used as it is and not
+      registered again. A second definition with another signing key would make apt fail.
+  loop: "{{ __agent_reuse_repo | dict2items | selectattr('value') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  tags: [repo, debian]

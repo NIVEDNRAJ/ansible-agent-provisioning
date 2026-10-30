@@ -79,3 +79,24 @@ agent_crb_repo: "{{ 'crb' if ansible_distribution == 'CentOS' else '*codeready-b
 agent_manage_services: true
 
 agent_dotnet_tools_dir: /opt/dotnet-tools
+
+# ── a host that already has software installed ───────────────────────────────
+# ⚑ NOTHING THE HOST ALREADY HAS IS REMOVED UNLESS YOU SAY SO. Before it installs, the
+#   role simulates the install (apt-get --simulate / dnf --assumeno) and checks the host
+#   for the packages Docker's own documentation says conflict with Docker CE. If the
+#   install would remove or break an installed package it stops, before changing
+#   anything, and names the packages. Then either:
+#     - leave that software alone:  install_docker=false  (or the matching agent_install_*)
+#     - or consent to the removal, for exactly these packages:
+#         agent_remove_packages: [docker.io, containerd, runc]
+#     - or consent to whatever the package manager decides (the Docker conflicts above
+#       are then removed by the role as well):
+#         agent_allow_package_removal: true
+agent_remove_packages: []
+agent_allow_package_removal: false
+
+# ⚑ A repository the host already defines (Docker, Microsoft, NodeSource: often added by
+#   hand or by Microsoft's packages-microsoft-prod package) is used as it is. Registering
+#   it again with a different signing-key file makes `apt update` fail for the whole host
+#   ("Conflicting values set for option Signed-By"). Set false to always register ours.
+agent_reuse_existing_repos: true

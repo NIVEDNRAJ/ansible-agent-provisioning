@@ -1,0 +1,65 @@
+---
+# =============================================================================
+# Conflicts that can be seen BEFORE anything is registered or installed
+# =============================================================================
+# ⚑ THE PACKAGE MANAGER SETTLES CONFLICTS BY REMOVING THE OTHER PACKAGE. `apt install
+#   docker-ce` removes docker.io and containerd; `apt install nodejs` (NodeSource) removes
+#   the distribution's npm and libnode. With -y that happens without a word, on a machine
+#   that may be running builds. So the role looks first, and a removal needs consent:
+#
+#     agent_remove_packages: [...]           remove exactly these, then install
+#     agent_allow_package_removal: true      accept what the package manager decides
+#     (or turn the tool off:                 install_docker=false, agent_install_nodejs=false)
+#
+#   1. Remove the packages the operator named.
+#   2. Docker CE's known conflicts (Docker's own "uninstall old versions" lists), checked by
+#      name because a file conflict such as podman-docker's /usr/bin/docker is only found
+#      at the very end of a dnf transaction, which no dry run reaches.
+#
+#   Runs before the repositories are registered, so a refusal here has changed nothing. The
+#   other half — simulating the whole install — needs the repositories and is in guard.yml.
+
+- name: Remove the packages named in agent_remove_packages
+  ansible.builtin.package:
+    name: "{{ agent_remove_packages }}"
+    state: absent
+  when: agent_remove_packages | length > 0
+  tags: [packages, guard]
+
+- name: Read the installed packages
+  ansible.builtin.import_tasks: installed.yml
+
+# Always defined, also when Docker is off or already installed: a re-run on a host that
+# has docker-ce must not trip over a variable that was only set for the first run.
+- name: Find installed packages that conflict with Docker CE
+  ansible.builtin.set_fact:
+    __agent_docker_found: >-
+      {{ (__agent_docker_conflicts | intersect(__agent_installed))
+         if (install_docker | bool and 'docker-ce' not in __agent_installed) else [] }}
+  tags: [packages, guard]
+
+- name: Refuse to install Docker CE over conflicting packages
+  ansible.builtin.assert:
+    that:
+      - __agent_docker_found | length == 0 or agent_allow_package_removal | bool
+    fail_msg: >-
+      Docker CE cannot be installed next to {{ __agent_docker_found | join(', ') }}, which this
+      host already has; installing it would remove them. Nothing has been changed.
+      Choose one: leave the host's own Docker alone with install_docker=false;
+      or remove exactly these with agent_remove_packages={{ __agent_docker_found | to_json }};
+      or accept the removal with agent_allow_package_removal=true.
+    success_msg: "No installed package conflicts with Docker CE"
+  tags: [packages, guard]
+
+- name: Remove the packages that conflict with Docker CE, as agent_allow_package_removal allows
+  ansible.builtin.package:
+    name: "{{ __agent_docker_found }}"
+    state: absent
+  when:
+    - __agent_docker_found | length > 0
+    - agent_allow_package_removal | bool
+  tags: [packages, guard]
+
+- name: Read the installed packages again
+  ansible.builtin.import_tasks: installed.yml
+  when: agent_remove_packages | length > 0 or __agent_docker_found | length > 0

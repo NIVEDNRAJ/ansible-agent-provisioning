@@ -128,7 +128,11 @@ Defaults are in `roles/*/defaults/main.yml`; override in inventory or with `-e`.
 | `agent_install_{sqlcmd,kubectl,helm,dotnet,nodejs,maven,java,yq,azcopy}` | `true` | switch a tool off |
 | `install_docker` | `false` | Docker CE + docker-group access (root-equivalent) |
 | `kubectl_version` / `helm_version` / `yq_version` | `v1.30.4` / `3.19.4` / `4.44.5` | |
+| `agent_dotnet_channels` | `["8.0", "10.0"]` | one SDK, ASP.NET runtime and runtime per entry. A channel the platform does not publish is **skipped with a message**, not a failure: 10.0 has no package on Ubuntu 20.04 and 22.04 (checked against the real repositories; it resolves on the other seven platforms) |
 | `agent_dotnet_ef_version` | `8.0.11` | |
+| `agent_remove_packages` | `[]` | installed packages the role may remove so an install can proceed — see [A host that already has software](#a-host-that-already-has-software) |
+| `agent_allow_package_removal` | `false` | accept whatever removals the package manager decides |
+| `agent_reuse_existing_repos` | `true` | use a Docker / Microsoft / NodeSource repository the host already defines instead of registering a second one |
 | `agent_nodejs_major` | `22` | |
 | `agent_mssql_tools_package` | `mssql-tools` | or `mssql-tools18` |
 | `agent_extra_packages`, `_debian`, `_redhat` | `[]` | additional distro packages |
@@ -196,6 +200,22 @@ An already-configured directory is never reconfigured: the run **fails** if it h
 
 **Migrating from the earlier version:** the default directory is now `/var/agents/agent<N>`, not `/opt/azure-pipelines-agent`. If an agent is found at the old location, preflight refuses to start a second one; set `ado_agent_root: /opt/azure-pipelines-agent` to keep managing it there (that provisions one agent in exactly that directory, as before).
 
+## A host that already has software
+
+A VM that was set up by hand, or by another tool, usually has some of this already: Docker's repository, Microsoft's (`packages-microsoft-prod`), Ubuntu's `docker.io`, a distribution `npm`. `agent_packages` handles it in two ways, and **removes nothing unless you say so**.
+
+**Repositories the host already defines are used as they are.** If `/etc/apt` already has an active source for the Microsoft, Docker or NodeSource URL (one-line `.list` or deb822 `.sources`), the role does not register its own. A second definition with a different `signed-by=` file makes `apt update` fail for the *whole host* — `E: Conflicting values set for option Signed-By` — which breaks every other tool on it, not just this role. The run prints which repository it reused. A source that already names this role's own keyring is this role's and is managed as before. `agent_reuse_existing_repos: false` restores the old behaviour (always register). On RHEL/CentOS a second definition of the same repository is only a duplicate-repo warning, so nothing special is done there.
+
+**An install that would remove or break an installed package is refused, before anything changes.** The role first checks for the packages Docker's documentation lists as conflicting with Docker CE (`docker.io`, `containerd`, `runc`, `podman-docker`, …), then simulates the whole install (`apt-get --simulate`, `dnf install --assumeno`). If a package would be removed, or the transaction cannot be resolved, it stops and names the packages. Then choose:
+
+| You want | Set |
+|---|---|
+| to leave that software alone | turn off the tool that needs the replacement: `install_docker=false`, `agent_install_nodejs=false`, … |
+| to allow exactly these removals | `-e '{"agent_remove_packages": ["docker.io", "containerd", "runc"]}'` |
+| to accept whatever the package manager decides | `-e agent_allow_package_removal=true` (the role also removes the known Docker conflicts itself) |
+
+The simulation is skipped under `--check` (a dry run registers no repository, so packages that come from one would not resolve); the Docker-conflict check is not.
+
 ## Verification
 
 The run fails if a required command is missing or the agent service status check fails. Afterwards:
@@ -238,12 +258,14 @@ AGENT_TARBALL=/path/vsts-agent-linux-x64-4.261.0.tar.gz tests/run-service-test.s
 
 `tests/run-matrix.sh` has three phases per target (see its header): `resolve` registers the real repositories and dry-runs the install; `agent` installs the runtime dependencies and starts `Agent.Listener --version`; `full` installs everything, runs again and requires `changed=0`, then runs each tool. RHEL is tested on AlmaLinux with the distribution fact overridden.
 
+`tests/run-conflict-test.sh` builds hosts that already have software and runs `agent_packages` on them: a Docker repository with another signing key (with a control that reproduces `Conflicting values set for option Signed-By` when the protection is switched off), Microsoft's own repository definition, `docker.io` + `containerd`, an unrelated package conflict, `podman-docker` on AlmaLinux 9, and a dnf conflict. See its header for the scenarios and what it does not cover.
+
 `tests/run-service-test.sh` runs the `ado_agent` role against **real systemd** (Ubuntu 22.04, Debian 12, AlmaLinux 9) through nine scenarios: two agents, interrupted-run repair, idempotency, registration failure, service crash, old-directory guard, existing-agent guard, the real agent against an unreachable server, and a tooling-only run. **Only `bin/Agent.Listener` is a test double** (it writes what a successful registration leaves behind); `config.sh`, `svc.sh`, the unit, systemd and the process list are real. Behind a TLS-inspecting proxy set `EXTRA_CA`; see each script's header for the other variables.
 
 ## Not verified here
 
 - **Registration against a real Azure DevOps Server / TFS.** It needs a real PAT and a pool; the tests use a stand-in for `bin/Agent.Listener` plus the real binary against an unreachable host. Whether the agent leaves its credential files with the modes the role then enforces is therefore also unobserved.
-- **The server preflight against a real server.** Exercised against `tests/mock_tfs.py` only. In particular the `packages/agent` endpoint's shape on your server version is assumed from documentation; if it answers differently the check reports "unverified" rather than failing. The server's version could not be read anonymously.
+- **The server preflight, beyond one real server.** It was exercised against `tests/mock_tfs.py` and then once against an on-premises TFS, whose `packages/agent` endpoint returns `version` as an object (`{"major", "minor", "patch"}`), not a string; both shapes are read now, and an answer in any other shape is reported "unverified" rather than failing.
 - **Agent 3.x.** Nothing was run with a 3.x agent; only 4.261.0 was exercised.
 - **The agent download through your firewall** — it was refused with 403 from some containers here.
 - **SELinux enforcing** on RHEL/CentOS (`svc.sh` calls `chcon` itself; read from the 4.261.0 template, not run).

@@ -24,6 +24,11 @@
   ansible.builtin.import_tasks: preflight.yml
   tags: [always]
 
+# Conflicts that can be seen by name (Docker CE against docker.io, podman-docker, ...).
+# Before any repository is touched, so a refusal has changed nothing.
+- name: Check for packages that conflict with what is about to be installed
+  ansible.builtin.import_tasks: conflicts.yml
+
 - name: Register repositories (Debian family)
   ansible.builtin.include_tasks: repos-debian.yml
   when: ansible_os_family == "Debian"

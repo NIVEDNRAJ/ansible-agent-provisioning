@@ -23,6 +23,10 @@
     group: root
   tags: [repo, debian]
 
+# Which of Microsoft / Docker / NodeSource the host already has. Those are reused below.
+- name: Find repositories the host already defines
+  ansible.builtin.import_tasks: existing.yml
+
 # ── Microsoft: mssql-tools, and .NET where the distro has none ───────────────
 - name: Fetch the Microsoft signing key (Debian/Ubuntu)
   ansible.builtin.get_url:
@@ -31,7 +35,9 @@
     mode: "0644"
     owner: root
     group: root
-  when: __agent_need_ms_repo | bool
+  when:
+    - __agent_need_ms_repo | bool
+    - __agent_reuse_repo.microsoft | default([]) | length == 0
   tags: [repo, debian]
 
 # Identical to the line roles/mssql/tasks/tools-debian.yml writes, so a host that
@@ -45,7 +51,9 @@
     state: present
     filename: mssql-release
     update_cache: false
-  when: __agent_need_ms_repo | bool
+  when:
+    - __agent_need_ms_repo | bool
+    - __agent_reuse_repo.microsoft | default([]) | length == 0
   tags: [repo, debian]
 
 # ⚑ Ubuntu 22.04+ gets .NET from Ubuntu's own feed. The Microsoft repository above
@@ -78,7 +86,9 @@
     mode: "0644"
     owner: root
     group: root
-  when: install_docker | bool
+  when:
+    - install_docker | bool
+    - __agent_reuse_repo.docker | default([]) | length == 0
   tags: [repo, docker, debian]
 
 - name: Register the Docker repository (Debian/Ubuntu)
@@ -89,7 +99,9 @@
       {{ ansible_distribution_release }} stable
     state: present
     update_cache: false
-  when: install_docker | bool
+  when:
+    - install_docker | bool
+    - __agent_reuse_repo.docker | default([]) | length == 0
   tags: [repo, docker, debian]
 
 # ── NodeSource: one Node major on every distro ───────────────────────────────
@@ -106,7 +118,9 @@
     mode: "0644"
     owner: root
     group: root
-  when: agent_install_nodejs | bool
+  when:
+    - agent_install_nodejs | bool
+    - __agent_reuse_repo.nodesource | default([]) | length == 0
   tags: [repo, nodejs, debian]
 
 - name: Register the NodeSource repository (Debian/Ubuntu)
@@ -117,7 +131,9 @@
     state: present
     filename: nodesource
     update_cache: false
-  when: agent_install_nodejs | bool
+  when:
+    - agent_install_nodejs | bool
+    - __agent_reuse_repo.nodesource | default([]) | length == 0
   tags: [repo, nodejs, debian]
 
 # The distro's own nodejs has a different version scheme and can outrank NodeSource's.

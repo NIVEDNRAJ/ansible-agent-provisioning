@@ -71,6 +71,34 @@ __agent_docker_rpm_distro: "{{ 'rhel' if ansible_distribution == 'RedHat' else '
 
 __agent_nodesource_keyring: /etc/apt/keyrings/nodesource.asc
 
+# What tasks/existing.yml looks for before registering a repository. `pattern` matches
+# the repository URL in an active apt source line; `ours` is the keyring this role would
+# use, so a line that already names it is this role's own and is not "foreign".
+# `wanted` is tested with `| bool` where it is used.
+__agent_repo_probes:
+  - key: microsoft
+    wanted: "{{ __agent_need_ms_repo }}"
+    pattern: 'packages\.microsoft\.com/{{ __agent_ms_deb_path }}/prod'
+    ours: "{{ __agent_ms_keyring }}"
+  - key: docker
+    wanted: "{{ install_docker }}"
+    pattern: 'download\.docker\.com/linux/{{ __agent_docker_deb_distro }}'
+    ours: "{{ __agent_docker_keyring }}"
+  - key: nodesource
+    wanted: "{{ agent_install_nodejs }}"
+    pattern: 'deb\.nodesource\.com/node_{{ agent_nodejs_major }}\.x'
+    ours: "{{ __agent_nodesource_keyring }}"
+
+# Installed packages that stop Docker CE installing. From Docker's "uninstall old
+# versions" lists for Ubuntu/Debian and RHEL/CentOS. They are checked up front because
+# a file conflict (podman-docker and docker-ce-cli both own /usr/bin/docker) only shows
+# up at the very end of a dnf transaction, which no dry run reaches.
+__agent_docker_conflicts_debian:
+  [docker.io, docker-doc, docker-compose, docker-compose-v2, podman-docker, containerd, runc]
+__agent_docker_conflicts_redhat:
+  [docker, docker-client, docker-client-latest, docker-common, docker-latest, docker-latest-logrotate, docker-logrotate, docker-engine, podman-docker]
+__agent_docker_conflicts: "{{ __agent_docker_conflicts_debian if ansible_os_family == 'Debian' else __agent_docker_conflicts_redhat }}"
+
 # ── Java ─────────────────────────────────────────────────────────────────────
 agent_java_major_debian: 17
 agent_java_major_redhat: "{{ 21 if ansible_distribution_major_version | int >= 10 else 17 }}"
@@ -85,6 +113,23 @@ __agent_libicu_debian:
   Ubuntu-22.04: libicu70
   Ubuntu-24.04: libicu74
   Debian-12: libicu72
+
+# ⚑ A .NET channel is installed only where the platform publishes it. Checked with the real
+#   repositories (tests/run-matrix.sh, resolve phase): dotnet-sdk-10.0 resolves on Ubuntu 24.04,
+#   Debian 12, CentOS Stream 9 and RHEL 9, and is "No package matching" on Ubuntu 20.04 and
+#   22.04. Asking for it there would fail the whole install, so it is left out and the run says
+#   so. Add an entry here if a platform gains or loses a channel.
+__agent_dotnet_unavailable:
+  Ubuntu-20.04: ["10.0"]
+  Ubuntu-22.04: ["10.0"]
+__agent_dotnet_skipped: "{{ agent_dotnet_channels | intersect(__agent_dotnet_unavailable.get(ansible_distribution ~ '-' ~ __agent_platform_version, [])) }}"
+__agent_dotnet_channels_effective: "{{ agent_dotnet_channels | difference(__agent_dotnet_skipped) }}"
+
+# One SDK, ASP.NET runtime and runtime for every entry of agent_dotnet_channels.
+__agent_dotnet_packages: >-
+  {{ (__agent_dotnet_channels_effective | map('regex_replace', '^', 'dotnet-sdk-') | list)
+     + (__agent_dotnet_channels_effective | map('regex_replace', '^', 'aspnetcore-runtime-') | list)
+     + (__agent_dotnet_channels_effective | map('regex_replace', '^', 'dotnet-runtime-') | list) }}
 
 # ── package catalog ──────────────────────────────────────────────────────────
 # One entry per tool. `ref` is the packages.txt line range it comes from —
@@ -120,8 +165,11 @@ __agent_catalog:
   dotnet:
     ref: "packages.txt:21-42 (dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0)"
     commands: [dotnet]
-    Debian: ["dotnet-sdk-{{ agent_dotnet_channel }}", "aspnetcore-runtime-{{ agent_dotnet_channel }}", "dotnet-runtime-{{ agent_dotnet_channel }}"]
-    RedHat: ["dotnet-sdk-{{ agent_dotnet_channel }}", "aspnetcore-runtime-{{ agent_dotnet_channel }}", "dotnet-runtime-{{ agent_dotnet_channel }}"]
+    # ⚑ One SDK, ASP.NET runtime and runtime per entry of agent_dotnet_channels (8.0 and 10.0
+    #   by default). The catalog read the old singular agent_dotnet_channel, which no longer
+    #   exists, so every run of this role failed with "'agent_dotnet_channel' is undefined".
+    Debian: "{{ __agent_dotnet_packages }}"
+    RedHat: "{{ __agent_dotnet_packages }}"
   nodejs:
     ref: "packages.txt:85-87, 94-95 (nodejs, npm)"
     # npm is bundled in the NodeSource nodejs package. Installing the distro `npm`

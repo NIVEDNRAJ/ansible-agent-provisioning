@@ -5,6 +5,11 @@
 # agent_resolved_packages is built from the catalog in vars/main.yml; the Debian
 # and RedHat branches differ only in the module and its repository arguments.
 
+# Look before installing: refuse, with names, an install that would remove or break
+# something the host already has. Read-only; see guard.yml.
+- name: Check the install against what is already on the host
+  ansible.builtin.import_tasks: guard.yml
+
 - name: Install packages (Debian/Ubuntu)
   ansible.builtin.apt:
     name: "{{ agent_resolved_packages }}"
@@ -26,6 +31,17 @@
     ACCEPT_EULA: "Y"
   when: ansible_os_family == "RedHat"
   tags: [packages, redhat]
+
+- name: Report the .NET channels this platform does not publish
+  ansible.builtin.debug:
+    msg: >-
+      .NET {{ __agent_dotnet_skipped | join(', ') }} is not published for {{ ansible_distribution }}
+      {{ __agent_platform_version }}, so it was not installed; installed:
+      {{ __agent_dotnet_channels_effective | join(', ') }}.
+  when:
+    - agent_install_dotnet | bool
+    - __agent_dotnet_skipped | length > 0
+  tags: [packages, dotnet]
 
 - name: Report where the packages.txt Java requirement could not be met
   ansible.builtin.debug:

@@ -1,0 +1,30 @@
+---
+# The names of the installed packages, in __agent_installed.
+# ⚑ dpkg-query / rpm, NOT package_facts: that module needs python3-apt on the target, which
+#   a minimal image does not have, and a conflict check that fails on a bare host is worse
+#   than none. Read-only, so it also runs under --check.
+
+- name: Read the installed packages (Debian/Ubuntu)
+  ansible.builtin.command:
+    argv: [dpkg-query, --show, --showformat, '${db:Status-Abbrev} ${Package}\n']
+  register: __agent_installed_deb
+  changed_when: false
+  check_mode: false
+  when: ansible_os_family == "Debian"
+  tags: [packages, guard]
+
+- name: Read the installed packages (RHEL/CentOS)
+  ansible.builtin.command:
+    argv: [rpm, --query, --all, --queryformat, '%{NAME}\n']
+  register: __agent_installed_rpm
+  changed_when: false
+  check_mode: false
+  when: ansible_os_family == "RedHat"
+  tags: [packages, guard]
+
+- name: Note the installed package names
+  ansible.builtin.set_fact:
+    __agent_installed: >-
+      {{ (__agent_installed_deb.stdout_lines | select('match', '^ii ') | map('regex_replace', '^ii +', '') | list)
+         if ansible_os_family == 'Debian' else __agent_installed_rpm.stdout_lines }}
+  tags: [packages, guard]

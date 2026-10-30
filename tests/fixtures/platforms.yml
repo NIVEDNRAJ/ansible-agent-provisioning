@@ -11,55 +11,56 @@ supported:
   - name: ubuntu-20.04
     facts: {distribution: Ubuntu, version: "20.04", major: "20", release: focal, family: Debian}
     include: [openjdk-17-jdk, unixodbc-dev, libicu66, mssql-tools, dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0, nodejs, maven, python3-venv, git, acl]
-    exclude: [unixODBC-devel, java-17-openjdk-devel, npm, libicu70]
+    exclude: [unixODBC-devel, java-17-openjdk-devel, npm, libicu70, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     expect: {dotnet_from_ubuntu_feed: false, need_ms_repo: true, ms_deb_path: "ubuntu/20.04", docker_distro: ubuntu}
 
   - name: ubuntu-22.04
     facts: {distribution: Ubuntu, version: "22.04", major: "22", release: jammy, family: Debian}
     include: [openjdk-17-jdk, unixodbc-dev, libicu70, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-venv]
-    exclude: [unixODBC-devel, npm, libicu66]
+    exclude: [unixODBC-devel, npm, libicu66, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     expect: {dotnet_from_ubuntu_feed: true, need_ms_repo: true, ms_deb_path: "ubuntu/22.04", docker_distro: ubuntu}
 
   - name: ubuntu-24.04
     facts: {distribution: Ubuntu, version: "24.04", major: "24", release: noble, family: Debian}
-    include: [openjdk-17-jdk, unixodbc-dev, libicu74, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    include: [openjdk-17-jdk, unixodbc-dev, libicu74, mssql-tools, dotnet-sdk-8.0, nodejs, maven, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [unixODBC-devel, npm, libicu70]
     expect: {dotnet_from_ubuntu_feed: true, need_ms_repo: true, ms_deb_path: "ubuntu/24.04", docker_distro: ubuntu}
 
   - name: debian-12
     facts: {distribution: Debian, version: "12.9", major: "12", release: bookworm, family: Debian}
     # libicu72 is the one installdependencies.sh cannot install.
-    include: [openjdk-17-jdk, unixodbc-dev, libicu72, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-venv]
+    include: [openjdk-17-jdk, unixodbc-dev, libicu72, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-venv, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [unixODBC-devel, npm, libicu67]
     expect: {dotnet_from_ubuntu_feed: false, need_ms_repo: true, ms_deb_path: "debian/12", docker_distro: debian}
 
   - name: centos-stream-9
     facts: {distribution: CentOS, version: "9", major: "9", release: Stream, family: RedHat}
-    include: [java-17-openjdk-devel, unixODBC-devel, libicu, mssql-tools, dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0, nodejs, maven, python3-pip]
+    include: [java-17-openjdk-devel, unixODBC-devel, libicu, mssql-tools, dotnet-sdk-8.0, aspnetcore-runtime-8.0, dotnet-runtime-8.0,
+              nodejs, maven, python3-pip, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [openjdk-17-jdk, unixodbc-dev, npm, python3-venv, java-21-openjdk-devel]
     expect: {need_ms_repo: true, crb_repo: crb, docker_rpm_distro: centos, java_deviates: false}
 
   - name: centos-stream-10
     facts: {distribution: CentOS, version: "10", major: "10", release: Stream, family: RedHat}
-    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [java-17-openjdk-devel, openjdk-17-jdk, npm]
     expect: {need_ms_repo: true, crb_repo: crb, docker_rpm_distro: centos, java_deviates: true}
 
   - name: rhel-8
     facts: {distribution: RedHat, version: "8.10", major: "8", release: Ootpa, family: RedHat}
-    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-pip]
+    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, python3-pip, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [openjdk-17-jdk, npm, java-21-openjdk-devel]
     expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: false}
 
   - name: rhel-9
     facts: {distribution: RedHat, version: "9.6", major: "9", release: Plow, family: RedHat}
-    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    include: [java-17-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [openjdk-17-jdk, npm, java-21-openjdk-devel]
     expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: false}
 
   - name: rhel-10
     facts: {distribution: RedHat, version: "10.0", major: "10", release: Coughlan, family: RedHat}
-    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven]
+    include: [java-21-openjdk-devel, unixODBC-devel, mssql-tools, dotnet-sdk-8.0, nodejs, maven, dotnet-sdk-10.0, aspnetcore-runtime-10.0, dotnet-runtime-10.0]
     exclude: [java-17-openjdk-devel, openjdk-17-jdk, npm]
     expect: {need_ms_repo: true, crb_repo: "*codeready-builder*", docker_rpm_distro: rhel, java_deviates: true}
 
